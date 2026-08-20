@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Money Tracker — 13F Positioning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0E11; --panel:#12161C; --panel-2:#171C23;
+    --border:#232B35; --border-soft:#1A2029;
+    --text:#E6E9EF; --text-dim:#8B95A5; --text-faint:#5B6572;
+    --amber:#E8B44C; --amber-dim:#8A6A2C;
+    --green:#3ED598; --green-dim:#1F6B4C;
+    --red:#FF5C5C; --red-dim:#7A2E2E;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
+  .app{max-width:1100px;margin:0 auto;padding:28px 20px 60px;}
+
+  .masthead{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px;flex-wrap:wrap;gap:16px;}
+  .masthead h1{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:26px;margin:0;letter-spacing:-0.02em;}
+  .masthead h1 span{color:var(--amber);}
+  .masthead .sub{color:var(--text-dim);font-size:13px;margin-top:4px;}
+
+  .clock{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--amber);padding:12px 18px;font-family:'IBM Plex Mono',monospace;text-align:right;min-width:250px;}
+  .clock .label{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);}
+  .clock .deadline-date{font-size:12.5px;color:var(--text-dim);margin-top:2px;}
+  .clock .countdown{font-size:22px;font-weight:600;color:var(--amber);margin-top:4px;letter-spacing:.02em;}
+
+  .status-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-faint);margin-bottom:18px;font-family:'IBM Plex Mono',monospace;}
+  .status-row button{background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:6px 12px;cursor:pointer;}
+  .status-row button:hover{border-color:var(--amber-dim);color:var(--text);}
+
+  .note-bar{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--amber);padding:12px 16px;font-size:12.5px;color:var(--text-dim);margin-bottom:22px;line-height:1.6;}
+  .note-bar b{color:var(--text);}
+
+  .fund-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
+  .fund-card{background:var(--panel);border:1px solid var(--border);padding:18px;}
+  .fund-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;}
+  .fund-name{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:16px;}
+  .fund-person{font-size:11.5px;color:var(--text-faint);margin-top:2px;}
+  .fund-meta{font-size:11px;color:var(--text-faint);margin-top:2px;}
+  .fund-aum{font-family:'IBM Plex Mono',monospace;text-align:right;}
+  .fund-aum .val{font-size:17px;font-weight:500;}
+  .fund-aum .delta{font-size:11.5px;margin-top:2px;}
+  .up{color:var(--green);} .down{color:var(--red);}
+  .holdings-table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:10px;}
+  .holdings-table th{text-align:left;color:var(--text-faint);font-weight:500;padding:5px 4px;border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.04em;}
+  .holdings-table td{padding:5px 4px;border-bottom:1px solid var(--border-soft);color:var(--text-dim);}
+  .holdings-table td.tk{color:var(--text);font-weight:500;}
+  .empty{padding:40px;text-align:center;color:var(--text-faint);font-size:13px;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="masthead">
+    <div>
+      <h1>Smart Money<span>.</span>Tracker</h1>
+      <div class="sub">13F institutional positioning — 8 hedge funds, auto-refreshed from SEC EDGAR</div>
+    </div>
+    <div class="clock">
+      <div class="label">Next 13F deadline</div>
+      <div class="deadline-date" id="deadlineDate">—</div>
+      <div class="countdown" id="countdown">—</div>
+    </div>
+  </div>
+
+  <div class="status-row">
+    <span id="lastUpdated">Loading data…</span>
+    <button onclick="loadData()">↻ Refresh</button>
+  </div>
+
+  <div class="note-bar">
+    <b>How to read this:</b> "Value Δ Q/Q" is the change in total reported 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss that mixes real trading gains, new capital, and market price moves (13F filings don't disclose entry price or realized P&amp;L). 13F filings are due 45 calendar days after each quarter-end and are the same deadline for every filer: Feb 14, May 15, Aug 14, Nov 14 (next business day if it falls on a weekend/holiday). Data below refreshes daily via a scheduled job that reads directly from SEC EDGAR.
+  </div>
+
+  <div class="fund-grid" id="fundGrid">
+    <div class="empty">Connect this page to your Supabase project (see CONFIG below) to load live data.</div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ---- CONFIG: fill these in with your own Supabase project values ----
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+// -----------------------------------------------------------------------
+
+let supabase = null;
+if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+function nextDeadline(now) {
+  const year = now.getUTCFullYear();
+  const candidates = [
+    new Date(Date.UTC(year - 1, 1, 14)),
+    new Date(Date.UTC(year, 1, 14)),
+    new Date(Date.UTC(year, 4, 15)),
+    new Date(Date.UTC(year, 7, 14)),
+    new Date(Date.UTC(year, 10, 14)),
+    new Date(Date.UTC(year + 1, 1, 14))
+  ];
+  const adjusted = candidates.map(d => {
+    const day = d.getUTCDay();
+    if (day === 6) d.setUTCDate(d.getUTCDate() + 2);
+    if (day === 0) d.setUTCDate(d.getUTCDate() + 1);
+    return d;
+  });
+  return adjusted.find(d => d.getTime() > now.getTime());
+}
+
+function renderClock() {
+  const now = new Date();
+  const deadline = nextDeadline(now);
+  const diff = deadline.getTime() - now.getTime();
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  document.getElementById("deadlineDate").textContent = deadline.toLocaleDateString(undefined, {year:"numeric",month:"long",day:"numeric"}) + " (UTC)";
+  document.getElementById("countdown").textContent = `${days}d ${hours}h ${mins}m`;
+}
+
+function fmtMoney(n) {
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
+  return "$" + n.toLocaleString();
+}
+
+async function loadData() {
+  document.getElementById("lastUpdated").textContent = "Loading data…";
+  if (!supabase) {
+    document.getElementById("lastUpdated").textContent = "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html.";
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("fund_snapshots")
+    .select("*")
+    .order("period_end", { ascending: false });
+
+  if (error) {
+    document.getElementById("lastUpdated").textContent = "Error loading data: " + error.message;
+    return;
+  }
+
+  const latestByFund = {};
+  const priorByFund = {};
+  for (const row of data) {
+    if (!latestByFund[row.cik]) {
+      latestByFund[row.cik] = row;
+    } else if (!priorByFund[row.cik]) {
+      priorByFund[row.cik] = row;
+    }
+  }
+
+  const rows = Object.values(latestByFund).sort((a, b) => b.portfolio_value - a.portfolio_value);
+  const grid = document.getElementById("fundGrid");
+
+  if (rows.length === 0) {
+    grid.innerHTML = '<div class="empty">No snapshots yet. Run the GitHub Action once (Actions tab → Refresh 13F data → Run workflow) to populate Supabase.</div>';
+  } else {
+    grid.innerHTML = rows.map(f => {
+      const prior = priorByFund[f.cik];
+      let deltaHtml = '<span style="color:var(--text-faint)">first snapshot on file</span>';
+      if (prior && prior.portfolio_value) {
+        const pct = ((f.portfolio_value - prior.portfolio_value) / prior.portfolio_value) * 100;
+        const cls = pct >= 0 ? "up" : "down";
+        const arrow = pct >= 0 ? "▲" : "▼";
+        deltaHtml = `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}% vs ${prior.period_end}</span>`;
+      }
+      const holdingsRows = (f.top_holdings || []).slice(0, 5).map(h =>
+        `<tr><td class="tk">${h.issuer}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td></tr>`
+      ).join("");
+
+      return `
+      <div class="fund-card">
+        <div class="fund-top">
+          <div>
+            <div class="fund-name">${f.fund_name}</div>
+            <div class="fund-person">${f.person || ""}</div>
+            <div class="fund-meta">Period ${f.period_end} · filed ${f.filed_date}</div>
+          </div>
+          <div class="fund-aum">
+            <div class="val">${fmtMoney(f.portfolio_value)}</div>
+            <div class="delta">${deltaHtml}</div>
+          </div>
+        </div>
+        <table class="holdings-table">
+          <tr><th>Ticker / issuer</th><th>% of book</th><th>Value</th></tr>
+          ${holdingsRows}
+        </table>
+      </div>`;
+    }).join("");
+  }
+
+  document.getElementById("lastUpdated").textContent = "Last loaded " + new Date().toLocaleString();
+}
+
+renderClock();
+setInterval(renderClock, 60000);
+loadData();
+</script>
+</body>
+</html>
