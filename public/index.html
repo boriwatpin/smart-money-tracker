@@ -90,10 +90,10 @@ const SUPABASE_URL = "https://xgjsyrvmevjzvpggkomo.supabase.co/rest/v1/";
 const SUPABASE_ANON_KEY = "sb_publishable_-47gqsHgjFLhPIyX-Y6m6Q_1O9A8lqy";
 // -----------------------------------------------------------------------
 
-let supabase = null;
-if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-}
+let supabaseClient = null;
+   if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
+     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+   }
 
 function nextDeadline(now) {
   const year = now.getUTCFullYear();
@@ -133,13 +133,13 @@ function fmtMoney(n) {
 
 async function loadData() {
   document.getElementById("lastUpdated").textContent = "Loading data…";
-  if (!supabase) {
-    document.getElementById("lastUpdated").textContent = "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html.";
-    return;
-  }
+ if (!supabaseClient) {
+     document.getElementById("lastUpdated").textContent = "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html.";
+     return;
+   }
 
-  const { data, error } = await supabase
-    .from("fund_snapshots")
+   const { data, error } = await supabaseClient
+     .from("fund_snapshots")
     .select("*")
     .order("period_end", { ascending: false });
 
