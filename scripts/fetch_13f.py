@@ -94,4 +94,95 @@ def parse_infotable(xml_text):
     """Strip namespaces (SEC's XML uses them inconsistently) and pull each holding row.
 
     SEC's 13F infotable XML often declares a namespace prefix (e.g. ns1:infoTable)
-    at the root and uses it throughout the body. Just removing
+    at the root and uses it throughout the body. Just removing the xmlns
+    declaration isn't enough -- the prefixes on every tag also need to go,
+    or ElementTree raises "unbound prefix".
+    """
+    xml_text = re.sub(r'xmlns(:\w+)?="[^"]*"', "", xml_text)
+    xml_text = re.sub(r'<(/?)\w+:', r'<\1', xml_text)
+    root = ET.fromstring(xml_text)
+    holdings = []
+    for entry in root.iter():
+        if entry.tag.split("}")[-1] == "infoTable":
+            name = (entry.findtext("nameOfIssuer") or "").strip()
+            cls = (entry.findtext("titleOfClass") or "").strip()
+            value = entry.findtext("value") or "0"
+            shares = entry.findtext(".//sshPrnamt") or "0"
+            cusip = (entry.findtext("cusip") or "").strip()
+            holdings.append({
+                "issuer": name,
+                "class": cls,
+                "value_thousands": int(value),
+                "shares": int(shares),
+                "cusip": cusip,
+            })
+    return holdings
+
+
+def upsert_snapshot(row):
+    url = f"{SUPABASE_URL}/rest/v1/fund_snapshots?on_conflict=cik,period_end"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+    }
+    r = requests.post(url, headers=headers, data=json.dumps([row]), timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Supabase upsert failed: {r.status_code} {r.text}")
+
+
+def main():
+    for fund in FUNDS:
+        try:
+            latest = latest_13f(fund["cik"])
+            if not latest:
+                print(f"[skip] no 13F-HR found for {fund['name']}")
+                continue
+
+            infotable_url = find_infotable_url(fund["cik"], latest["accession"])
+            if not infotable_url:
+                print(f"[warn] no infotable found for {fund['name']} ({latest['accession']})")
+                continue
+
+            holdings = parse_infotable(get_text(infotable_url))
+            if not holdings:
+                print(f"[warn] infotable parsed to zero holdings for {fund['name']}")
+                continue
+
+            total_thousands = sum(h["value_thousands"] for h in holdings)
+            total_value = total_thousands * 1000
+
+            top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
+            top_out = [
+                {
+                    "issuer": h["issuer"],
+                    "class": h["class"],
+                    "value": h["value_thousands"] * 1000,
+                    "shares": h["shares"],
+                    "pct_of_portfolio": round((h["value_thousands"] / total_thousands) * 100, 2) if total_thousands else 0,
+                }
+                for h in top
+            ]
+
+            row = {
+                "fund_name": fund["name"],
+                "person": fund["person"],
+                "cik": fund["cik"],
+                "period_end": latest["period"],
+                "filed_date": latest["filed"],
+                "portfolio_value": total_value,
+                "num_holdings": len(holdings),
+                "top_holdings": top_out,
+                "source_accession": latest["accession"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            upsert_snapshot(row)
+            print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings)")
+            time.sleep(0.3)  # be polite to SEC's rate limits
+        except Exception as e:
+            print(f"[error] {fund['name']}: {e}")
+
+
+if __name__ == "__main__":
+    main()
