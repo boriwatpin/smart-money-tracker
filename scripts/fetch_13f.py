@@ -157,18 +157,26 @@ def get_text(url):
     return r.text
 
 
-def latest_13f(cik):
-    """Find the most recent 13F-HR filing for a CIK from the submissions feed."""
+def recent_13f_filings(cik, n=2):
+    """Return the n most recent 13F-HR filings for a CIK, newest first.
+
+    Pulling 2 quarters (instead of just the latest) means new-position
+    detection and price estimates work immediately on first run, rather
+    than only after the *next* quarter's filing shows up.
+    """
     data = get_json(f"https://data.sec.gov/submissions/CIK{cik}.json")
     recent = data["filings"]["recent"]
+    results = []
     for i, form in enumerate(recent["form"]):
         if form == "13F-HR":
-            return {
+            results.append({
                 "accession": recent["accessionNumber"][i],
                 "filed": recent["filingDate"][i],
                 "period": recent["reportDate"][i],
-            }
-    return None
+            })
+        if len(results) >= n:
+            break
+    return results
 
 
 def find_infotable_url(cik, accession):
@@ -197,11 +205,10 @@ def find_infotable_url(cik, accession):
 def parse_infotable(xml_text):
     """Strip namespaces (SEC's XML uses them inconsistently) and pull each holding row.
 
-    Filings often declare a namespace prefix (e.g. xmlns:xsi=...) and then use
-    it in an attribute like xsi:schemaLocation on the root tag. If we strip the
-    declaration but leave the attribute, the parser sees an undeclared prefix
-    and raises "unbound prefix" -- so prefixed attributes must go too, not just
-    the xmlns declarations and tag prefixes.
+    SEC's 13F infotable XML often declares a namespace prefix (e.g. ns1:infoTable)
+    at the root and uses it throughout the body. Just removing the xmlns
+    declaration isn't enough -- the prefixes on every tag also need to go,
+    or ElementTree raises "unbound prefix".
     """
     xml_text = re.sub(r'\s+\w+:\w+=["\'][^"\']*["\']', "", xml_text)
     xml_text = re.sub(r'xmlns(:\w+)?=["\'][^"\']*["\']', "", xml_text)
@@ -238,81 +245,88 @@ def upsert_snapshot(row):
         raise RuntimeError(f"Supabase upsert failed: {r.status_code} {r.text}")
 
 
+def process_filing(fund, latest, figi_cache):
+    infotable_url = find_infotable_url(fund["cik"], latest["accession"])
+    if not infotable_url:
+        print(f"[warn] no infotable found for {fund['name']} ({latest['accession']})")
+        return
+
+    holdings = parse_infotable(get_text(infotable_url))
+    if not holdings:
+        print(f"[warn] infotable parsed to zero holdings for {fund['name']}")
+        return
+
+    total_thousands = sum(h["value_thousands"] for h in holdings)
+    total_value = total_thousands * 1000
+
+    top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
+
+    # Figure out which of these are genuinely new vs. whatever's already stored.
+    prior = get_prior_snapshot(fund["cik"])
+    is_new_quarter = prior is not None and prior.get("period_end") != latest["period"]
+    prior_cusips = set()
+    if is_new_quarter:
+        prior_cusips = {h.get("cusip") for h in (prior.get("top_holdings") or []) if h.get("cusip")}
+
+    top_out = []
+    new_count = 0
+    for h in top:
+        entry = {
+            "issuer": h["issuer"],
+            "class": h["class"],
+            "value": h["value_thousands"] * 1000,
+            "shares": h["shares"],
+            "cusip": h["cusip"],
+            "pct_of_portfolio": round((h["value_thousands"] / total_thousands) * 100, 2) if total_thousands else 0,
+        }
+
+        is_new = is_new_quarter and h["cusip"] and h["cusip"] not in prior_cusips
+        entry["is_new"] = bool(is_new)
+
+        # Only spend API calls on genuinely new positions -- this is
+        # where a price estimate is actually meaningful (see README).
+        if is_new and new_count < 15:  # cap per fund per run, be a good API citizen
+            ticker = cusip_to_ticker(h["cusip"], figi_cache)
+            if ticker:
+                price_info = estimate_new_position_price(ticker, latest["period"])
+                if price_info:
+                    entry["price_estimate"] = price_info
+            new_count += 1
+            time.sleep(0.25)
+
+        top_out.append(entry)
+
+    row = {
+        "fund_name": fund["name"],
+        "person": fund["person"],
+        "cik": fund["cik"],
+        "period_end": latest["period"],
+        "filed_date": latest["filed"],
+        "portfolio_value": total_value,
+        "num_holdings": len(holdings),
+        "top_holdings": top_out,
+        "source_accession": latest["accession"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    upsert_snapshot(row)
+    print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings, {new_count} new positions checked)")
+
+
 def main():
     figi_cache = {}
 
     for fund in FUNDS:
         try:
-            latest = latest_13f(fund["cik"])
-            if not latest:
+            filings = recent_13f_filings(fund["cik"], n=2)
+            if not filings:
                 print(f"[skip] no 13F-HR found for {fund['name']}")
                 continue
 
-            infotable_url = find_infotable_url(fund["cik"], latest["accession"])
-            if not infotable_url:
-                print(f"[warn] no infotable found for {fund['name']} ({latest['accession']})")
-                continue
-
-            holdings = parse_infotable(get_text(infotable_url))
-            if not holdings:
-                print(f"[warn] infotable parsed to zero holdings for {fund['name']}")
-                continue
-
-            total_thousands = sum(h["value_thousands"] for h in holdings)
-            total_value = total_thousands * 1000
-
-            top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
-
-            # Figure out which of these are genuinely new vs. last quarter's filing.
-            prior = get_prior_snapshot(fund["cik"])
-            is_new_quarter = prior is not None and prior.get("period_end") != latest["period"]
-            prior_cusips = set()
-            if is_new_quarter:
-                prior_cusips = {h.get("cusip") for h in (prior.get("top_holdings") or []) if h.get("cusip")}
-
-            top_out = []
-            new_count = 0
-            for h in top:
-                entry = {
-                    "issuer": h["issuer"],
-                    "class": h["class"],
-                    "value": h["value_thousands"] * 1000,
-                    "shares": h["shares"],
-                    "cusip": h["cusip"],
-                    "pct_of_portfolio": round((h["value_thousands"] / total_thousands) * 100, 2) if total_thousands else 0,
-                }
-
-                is_new = is_new_quarter and h["cusip"] and h["cusip"] not in prior_cusips
-                entry["is_new"] = bool(is_new)
-
-                # Only spend API calls on genuinely new positions -- this is
-                # where a price estimate is actually meaningful (see README).
-                if is_new and new_count < 15:  # cap per fund per run, be a good API citizen
-                    ticker = cusip_to_ticker(h["cusip"], figi_cache)
-                    if ticker:
-                        price_info = estimate_new_position_price(ticker, latest["period"])
-                        if price_info:
-                            entry["price_estimate"] = price_info
-                    new_count += 1
-                    time.sleep(0.25)
-
-                top_out.append(entry)
-
-            row = {
-                "fund_name": fund["name"],
-                "person": fund["person"],
-                "cik": fund["cik"],
-                "period_end": latest["period"],
-                "filed_date": latest["filed"],
-                "portfolio_value": total_value,
-                "num_holdings": len(holdings),
-                "top_holdings": top_out,
-                "source_accession": latest["accession"],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            upsert_snapshot(row)
-            print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings, {new_count} new positions checked)")
-            time.sleep(0.3)  # be polite to SEC's rate limits
+            # Process oldest first so it's already stored as the "prior"
+            # snapshot by the time we process the newer one.
+            for filing in reversed(filings):
+                process_filing(fund, filing, figi_cache)
+                time.sleep(0.3)  # be polite to SEC's rate limits
         except Exception as e:
             print(f"[error] {fund['name']}: {e}")
 
