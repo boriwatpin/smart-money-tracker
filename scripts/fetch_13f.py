@@ -307,4 +307,4 @@ def process_filing(fund, latest, figi_cache):
         entry["is_new"] = bool(is_new)
 
         is_increased = False
-        if not is_new and
+        if not is_new and is_new_quarter and h["cusip"] in prior_by_cusip:
