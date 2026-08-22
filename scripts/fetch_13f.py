@@ -20,6 +20,7 @@ import re
 import time
 import json
 import requests
+import yfinance as yf
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timezone
 from urllib.parse import quote
@@ -114,66 +115,52 @@ def quarter_start_iso(period_end_str):
     return date(d.year, q_month, 1).isoformat()
 
 
-STOOQ_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-}
-
-
-def fetch_daily_closes(ticker):
-    """Pull daily closing prices from Stooq (free, no API key required).
-
-    Stooq appears to reject requests without a browser-like User-Agent
-    (returns 404 instead of the CSV) -- a bare Python/requests default
-    User-Agent gets blocked.
-    """
-    url = f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d"
-    r = requests.get(url, headers=STOOQ_HEADERS, timeout=15)
-    r.raise_for_status()
-    lines = r.text.strip().splitlines()
-    rows = []
-    for line in lines[1:]:
-        parts = line.split(",")
-        if len(parts) < 5:
-            continue
-        try:
-            rows.append({"date": parts[0], "close": float(parts[4])})
-        except ValueError:
-            continue
-    return rows
+def normalize_ticker_for_yahoo(ticker):
+    """Yahoo uses a dash for share-class tickers where other sources use a
+    dot (e.g. BRK.B -> BRK-B)."""
+    return ticker.replace(".", "-")
 
 
 def estimate_price_for_period(ticker, period_end_str):
     """Average of daily closing prices during a given quarter, compared to
-    the most recent close available. Used both for brand-new positions
-    (as a rough entry price) and for significant increases to existing
-    positions (as a rough price for the shares that were added).
+    the most recent close available, using Yahoo Finance data via yfinance.
+    Used both for brand-new positions (as a rough entry price) and for
+    significant increases to existing positions (as a rough price for the
+    shares that were added).
 
     This is necessarily an approximation -- SEC filings don't disclose
     which day(s) within the quarter a fund actually traded, so this
     assumes even buying across the quarter rather than a single trade.
     """
     try:
-        series = fetch_daily_closes(ticker)
-        if not series:
-            print(f"[debug] Stooq returned no price data for ticker {ticker}")
-            return None
+        yahoo_ticker = normalize_ticker_for_yahoo(ticker)
         q_start = quarter_start_iso(period_end_str)
-        in_quarter = [row["close"] for row in series if q_start <= row["date"] <= period_end_str]
-        if not in_quarter:
-            print(f"[debug] no {period_end_str}-quarter prices found for {ticker} (have {len(series)} rows, range {series[0]['date']} to {series[-1]['date']})")
+        hist = yf.Ticker(yahoo_ticker).history(start=q_start, auto_adjust=True)
+        if hist.empty:
+            print(f"[debug] yfinance returned no data for ticker {ticker}")
             return None
-        avg_price = sum(in_quarter) / len(in_quarter)
-        current_price = series[-1]["close"]
+
+        hist = hist.reset_index()
+        hist["date_str"] = hist["Date"].dt.strftime("%Y-%m-%d")
+
+        in_quarter = hist[(hist["date_str"] >= q_start) & (hist["date_str"] <= period_end_str)]["Close"]
+        if in_quarter.empty:
+            print(f"[debug] no {period_end_str}-quarter prices found for {ticker} (have {len(hist)} rows total)")
+            return None
+
+        avg_price = float(in_quarter.mean())
+        current_price = float(hist["Close"].iloc[-1])
+        current_date = hist["date_str"].iloc[-1]
         pct_change = ((current_price - avg_price) / avg_price) * 100 if avg_price else None
         return {
             "ticker": ticker,
             "avg_price_quarter": round(avg_price, 2),
             "current_price": round(current_price, 2),
             "pct_change_since_avg": round(pct_change, 2) if pct_change is not None else None,
-            "price_as_of": series[-1]["date"],
+            "price_as_of": current_date,
         }
     except Exception as e:
-        print(f"[debug] price estimation exception for ticker {ticker}: {e}")
+        print(f"[debug] yfinance exception for ticker {ticker}: {e}")
         return None
 
 
@@ -343,7 +330,7 @@ def process_filing(fund, latest, figi_cache):
             elif ticker:
                 print(f"[debug] skipping non-equity-looking ticker '{ticker}' (likely a bond, not a stock)")
             priced_count += 1
-            time.sleep(1.5)
+            time.sleep(0.8)
 
         if is_new:
             new_count += 1
