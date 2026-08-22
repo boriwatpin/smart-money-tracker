@@ -371,14 +371,18 @@ function buildHistoryTable(fund, history) {
     return '<div style="padding:12px;color:var(--text-faint);font-size:11.5px;font-style:italic;">Not enough history yet — run the backfill workflow, or wait for more quarters to accumulate.</div>';
   }
 
-  const latest = history[history.length - 1];
+  const HISTORY_WINDOW = 8; // rolling window so this doesn't grow wider forever as quarters accumulate
+  const truncated = history.length > HISTORY_WINDOW;
+  const capped = history.slice(-HISTORY_WINDOW);
+
+  const latest = capped[capped.length - 1];
   const topRows = (latest.top_holdings || []).slice(0, 10).filter(h => h.cusip);
 
-  const headerCells = history.map(h => `<th>${h.period_end}</th>`).join("");
+  const headerCells = capped.map(h => `<th>${h.period_end}</th>`).join("");
 
   const bodyRows = topRows.map(row => {
     let prevVal = null;
-    const cells = history.map(snapshot => {
+    const cells = capped.map(snapshot => {
       const match = (snapshot.top_holdings || []).find(h => h.cusip === row.cusip);
       const val = match ? match.pct_of_portfolio : null;
       let cellHtml;
@@ -400,10 +404,13 @@ function buildHistoryTable(fund, history) {
   }).join("");
 
   return `
-    <table class="holdings-table" style="margin-top:8px;">
-      <tr><th>Ticker / issuer</th>${headerCells}</tr>
-      ${bodyRows}
-    </table>`;
+    ${truncated ? `<div style="font-size:10px;color:var(--text-faint);margin-top:8px;">Showing the last ${HISTORY_WINDOW} of ${history.length} stored quarters.</div>` : ""}
+    <div style="overflow-x:auto;">
+      <table class="holdings-table" style="margin-top:8px;">
+        <tr><th>Ticker / issuer</th>${headerCells}</tr>
+        ${bodyRows}
+      </table>
+    </div>`;
 }
 
 const SECTOR_RULES = [
@@ -737,8 +744,13 @@ function buildMovesFeed(data) {
     }
   });
 
-  events.sort((a, b) => b.period.localeCompare(a.period));
-  return { events, globalLatestPeriod };
+  const MOVES_WINDOW = 8; // rolling window so this doesn't grow unbounded as quarters accumulate
+  const allPeriods = Array.from(new Set(events.map(e => e.period))).sort();
+  const windowPeriods = new Set(allPeriods.slice(-MOVES_WINDOW));
+  const windowedEvents = events.filter(e => windowPeriods.has(e.period));
+
+  windowedEvents.sort((a, b) => b.period.localeCompare(a.period));
+  return { events: windowedEvents, globalLatestPeriod, truncated: allPeriods.length > MOVES_WINDOW, totalQuarters: allPeriods.length, shownQuarters: windowPeriods.size };
 }
 
 function renderMoveEvent(e) {
@@ -775,7 +787,7 @@ function renderMoveEvent(e) {
 }
 
 function renderMovesFeed(data) {
-  const { events, globalLatestPeriod } = buildMovesFeed(data);
+  const { events, globalLatestPeriod, truncated, totalQuarters, shownQuarters } = buildMovesFeed(data);
   const byType = { new: [], increased: [], exit: [] };
   events.forEach(e => byType[e.type].push(e));
 
@@ -787,7 +799,12 @@ function renderMovesFeed(data) {
     exit: { label: "Exits", color: "var(--red)" },
   };
 
+  const truncNote = truncated
+    ? `<div style="font-size:10px;color:var(--text-faint);margin-bottom:10px;">Showing the last ${shownQuarters} of ${totalQuarters} stored quarters.</div>`
+    : "";
+
   const tabsHtml = `
+    ${truncNote}
     <div style="display:flex;gap:6px;margin-bottom:12px;">
       ${["new", "increased", "exit"].map(t => `
         <button class="moves-tab${t === "new" ? " active" : ""}" data-tab="${t}" onclick="switchMovesTab('${t}')">
