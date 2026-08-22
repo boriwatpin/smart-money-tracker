@@ -114,13 +114,14 @@ def fetch_daily_closes(ticker):
     return rows
 
 
-def estimate_new_position_price(ticker, period_end_str):
-    """Rough entry-price estimate for a brand-new position: the average of
-    daily closing prices during the quarter the fund reported buying it,
-    compared to the most recent close available.
+def estimate_price_for_period(ticker, period_end_str):
+    """Average of daily closing prices during a given quarter, compared to
+    the most recent close available. Used both for brand-new positions
+    (as a rough entry price) and for significant increases to existing
+    positions (as a rough price for the shares that were added).
 
     This is necessarily an approximation -- SEC filings don't disclose
-    which day(s) within the quarter a fund actually bought, so this
+    which day(s) within the quarter a fund actually traded, so this
     assumes even buying across the quarter rather than a single trade.
     """
     try:
@@ -261,15 +262,17 @@ def process_filing(fund, latest, figi_cache):
 
     top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
 
-    # Figure out which of these are genuinely new vs. whatever's already stored.
+    # Figure out what's new or meaningfully increased vs. whatever's already stored.
     prior = get_prior_snapshot(fund["cik"])
     is_new_quarter = prior is not None and prior.get("period_end") != latest["period"]
-    prior_cusips = set()
+    prior_by_cusip = {}
     if is_new_quarter:
-        prior_cusips = {h.get("cusip") for h in (prior.get("top_holdings") or []) if h.get("cusip")}
+        prior_by_cusip = {h.get("cusip"): h for h in (prior.get("top_holdings") or []) if h.get("cusip")}
 
     top_out = []
     new_count = 0
+    increased_count = 0
+    priced_count = 0
     for h in top:
         entry = {
             "issuer": h["issuer"],
@@ -280,19 +283,39 @@ def process_filing(fund, latest, figi_cache):
             "pct_of_portfolio": round((h["value_thousands"] / total_thousands) * 100, 2) if total_thousands else 0,
         }
 
-        is_new = is_new_quarter and h["cusip"] and h["cusip"] not in prior_cusips
+        is_new = is_new_quarter and h["cusip"] and h["cusip"] not in prior_by_cusip
         entry["is_new"] = bool(is_new)
 
-        # Only spend API calls on genuinely new positions -- this is
-        # where a price estimate is actually meaningful (see README).
-        if is_new and new_count < 15:  # cap per fund per run, be a good API citizen
+        is_increased = False
+        if not is_new and is_new_quarter and h["cusip"] in prior_by_cusip:
+            prior_shares = prior_by_cusip[h["cusip"]].get("shares") or 0
+            if prior_shares > 0:
+                shares_added = h["shares"] - prior_shares
+                pct_share_increase = (shares_added / prior_shares) * 100
+                # 15%+ more shares is the bar for "meaningfully increased" --
+                # small share creep from options/DRIP-like adjustments isn't
+                # worth flagging as a notable buy.
+                if shares_added > 0 and pct_share_increase >= 15:
+                    is_increased = True
+                    entry["shares_added"] = shares_added
+                    entry["pct_share_increase"] = round(pct_share_increase, 1)
+        entry["is_increased"] = is_increased
+
+        # Only spend API calls on genuinely new or meaningfully-increased
+        # positions -- this is where a price estimate is actually meaningful.
+        if (is_new or is_increased) and priced_count < 20:  # shared cap per fund per run
             ticker = cusip_to_ticker(h["cusip"], figi_cache)
             if ticker:
-                price_info = estimate_new_position_price(ticker, latest["period"])
+                price_info = estimate_price_for_period(ticker, latest["period"])
                 if price_info:
                     entry["price_estimate"] = price_info
-            new_count += 1
+            priced_count += 1
             time.sleep(0.25)
+
+        if is_new:
+            new_count += 1
+        if is_increased:
+            increased_count += 1
 
         top_out.append(entry)
 
@@ -309,7 +332,7 @@ def process_filing(fund, latest, figi_cache):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     upsert_snapshot(row)
-    print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings, {new_count} new positions checked)")
+    print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings, {new_count} new, {increased_count} increased, {priced_count} priced)")
 
 
 def main():
