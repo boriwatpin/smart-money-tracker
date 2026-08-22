@@ -126,6 +126,9 @@
   .search-input:focus{outline:none;border-color:var(--amber-dim);}
   .search-results{margin-top:8px;background:var(--panel);border:1px solid var(--border);padding:12px;}
   .lag-badge{color:var(--amber);border:1px solid var(--amber-dim);font-size:9px;padding:0 4px;margin-left:4px;}
+  .grid-controls{display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap;}
+  .grid-controls select{background:var(--panel);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:7px 10px;cursor:pointer;}
+  .grid-controls select:focus{outline:none;border-color:var(--amber-dim);}
 </style>
 </head>
 <body>
@@ -158,6 +161,9 @@
     </div>
     <div class="nav-item" data-target="section-sector" onclick="goToSection('section-sector')">
       <span class="nav-icon">📊</span><span class="nav-label">Sector rollup</span>
+    </div>
+    <div class="nav-item" data-target="section-similarity" onclick="goToSection('section-similarity')">
+      <span class="nav-icon">🔗</span><span class="nav-label">Fund similarity</span>
     </div>
   </nav>
 
@@ -195,6 +201,17 @@
       <b>How to read this:</b> Click a card to see full top holdings. "Value Δ Q/Q" is the change in total 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss (13F filings don't disclose entry price or realized P&amp;L, so this mixes trading activity with market moves). A <span class="flag-new" style="padding:1px 5px;">NEW</span> badge means the fund didn't hold that CUSIP last quarter; a <span class="flag-increased" style="padding:1px 5px;">+X%</span> badge means an existing position grew by 15% or more in share count. For both, we estimate a price as the <i>average daily closing price during the quarter</i> (SEC doesn't disclose exact trade dates) compared to today's price — a rough approximation, not a real cost basis. "Position history" tracks a holding's % of portfolio across stored quarters — a "—" means it wasn't in that fund's top 25 that quarter, not necessarily that they didn't hold it at all. "Notable moves" only shows moves worth more than 1% of a fund's book (and, where priced, more than a 1% price move) to cut out noise. 13F filings are due 45 days after quarter-end: Feb 14, May 15, Aug 14, Nov 14.
     </div>
 
+    <div class="grid-controls">
+      <select id="sortSelect" onchange="applySortFilter()">
+        <option value="aum">Sort: AUM (default)</option>
+        <option value="new">Sort: Most new positions</option>
+        <option value="alpha">Sort: Alphabetical</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim);cursor:pointer;">
+        <input type="checkbox" id="activeOnlyCheckbox" onchange="applySortFilter()"> Only funds with activity this quarter
+      </label>
+    </div>
+
     <div class="fund-grid" id="fundGrid">
       <div class="empty">Connect this page to your Supabase project (see CONFIG below) to load live data.</div>
     </div>
@@ -225,6 +242,9 @@ if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
 
 let navScrollObserver = null;
 let latestComputed = [];
+let latestHistoryByFund = {};
+let currentSort = "aum";
+let currentActiveOnly = false;
 const navCounts = {};
 
 function toggleNav() {
@@ -289,7 +309,7 @@ function setActiveNav(id) {
 
 function setupScrollSpy() {
   if (navScrollObserver) navScrollObserver.disconnect();
-  const targets = ["section-overview", "section-signals", "section-consensus", "section-divergence", "section-concentration", "section-pricedelta", "section-moves", "section-sector"];
+  const targets = ["section-overview", "section-signals", "section-consensus", "section-divergence", "section-concentration", "section-pricedelta", "section-moves", "section-sector", "section-similarity"];
   const elements = targets.map(id => document.getElementById(id)).filter(Boolean);
   if (elements.length === 0) return;
 
@@ -407,6 +427,30 @@ function classifySector(issuer) {
   return "Other / Unclassified";
 }
 
+function buildConsensusTrendCell(cusip) {
+  const quarterSet = new Set();
+  Object.values(latestHistoryByFund).forEach(snapshots => snapshots.forEach(s => quarterSet.add(s.period_end)));
+  const quarters = Array.from(quarterSet).sort().slice(-4);
+  if (quarters.length < 2) return '<span style="color:var(--text-faint)">—</span>';
+
+  const counts = quarters.map(q => {
+    let count = 0;
+    Object.values(latestHistoryByFund).forEach(snapshots => {
+      const snap = snapshots.find(s => s.period_end === q);
+      if (snap && (snap.top_holdings || []).some(h => h.cusip === cusip)) count++;
+    });
+    return count;
+  });
+
+  let html = `${counts[0]}`;
+  for (let i = 1; i < counts.length; i++) {
+    if (counts[i] > counts[i - 1]) html += ` <span class="up">▲${counts[i]}</span>`;
+    else if (counts[i] < counts[i - 1]) html += ` <span class="down">▼${counts[i]}</span>`;
+    else html += ` ${counts[i]}`;
+  }
+  return html;
+}
+
 function buildConsensusPicks(computed) {
   const byCusip = {};
   computed.forEach(({ f }) => {
@@ -418,7 +462,9 @@ function buildConsensusPicks(computed) {
     });
   });
 
-  const filtered = Object.values(byCusip).filter(row => row.funds.length >= 2);
+  const filtered = Object.entries(byCusip)
+    .filter(([, row]) => row.funds.length >= 2)
+    .map(([cusip, row]) => ({ cusip, ...row }));
   navCounts.consensus = filtered.length;
   const ranked = filtered
     .sort((a, b) => b.funds.length - a.funds.length || b.totalValue - a.totalValue)
@@ -433,14 +479,17 @@ function buildConsensusPicks(computed) {
       <td class="tk">${shortName(row.issuer)}</td>
       <td>${row.funds.length}/10</td>
       <td>${fmtMoney(row.totalValue)}</td>
+      <td style="white-space:nowrap;">${buildConsensusTrendCell(row.cusip)}</td>
       <td>${row.funds.map(name => `<span class="fund-chip">${name.split(" ")[0]}</span>`).join("")}</td>
     </tr>`).join("");
 
   return `
-    <table class="holdings-table">
-      <tr><th>Issuer</th><th># Funds</th><th>Combined Value</th><th>Held by</th></tr>
-      ${rows}
-    </table>`;
+    <div style="overflow-x:auto;">
+      <table class="holdings-table">
+        <tr><th>Issuer</th><th># Funds</th><th>Combined Value</th><th>Trend (holders, last 4Q)</th><th>Held by</th></tr>
+        ${rows}
+      </table>
+    </div>`;
 }
 
 function buildDivergence(computed) {
@@ -485,6 +534,46 @@ function buildDivergence(computed) {
       <tr><th>Issuer</th><th>Buying / Increasing</th><th>Fully Exiting</th></tr>
       ${rows}
     </table>`;
+}
+
+function buildFundSimilarity(computed) {
+  const funds = computed.map(({ f }) => ({
+    name: f.fund_name,
+    cusips: new Set((f.top_holdings || []).map(h => h.cusip).filter(Boolean)),
+  }));
+
+  const n = funds.length;
+  let maxOverlap = 1;
+  const matrix = [];
+  for (let i = 0; i < n; i++) {
+    matrix.push([]);
+    for (let j = 0; j < n; j++) {
+      if (i === j) { matrix[i].push(null); continue; }
+      let overlap = 0;
+      funds[i].cusips.forEach(c => { if (funds[j].cusips.has(c)) overlap++; });
+      matrix[i].push(overlap);
+      if (overlap > maxOverlap) maxOverlap = overlap;
+    }
+  }
+
+  let html = '<div style="overflow-x:auto;"><table class="holdings-table" style="font-size:10px;">';
+  html += '<tr><th></th>' + funds.map(f => `<th>${f.name.split(" ")[0]}</th>`).join("") + '</tr>';
+  for (let i = 0; i < n; i++) {
+    html += `<tr><td class="tk">${funds[i].name.split(" ")[0]}</td>`;
+    for (let j = 0; j < n; j++) {
+      if (i === j) {
+        html += '<td style="background:var(--panel-2);text-align:center;">·</td>';
+        continue;
+      }
+      const val = matrix[i][j];
+      const intensity = val / maxOverlap;
+      const bg = `rgba(232,180,76,${(intensity * 0.55).toFixed(2)})`;
+      html += `<td style="background:${bg};text-align:center;color:var(--text);">${val}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</table></div>';
+  return html;
 }
 
 function buildSectorRollup(computed) {
@@ -868,9 +957,14 @@ function renderCrossFundDashboard(computed, allData) {
         <h3>📰 Notable Moves</h3>
         ${renderMovesFeed(allData)}
       </div>
-      <div class="cross-panel" id="section-sector">
+      <div class="cross-panel" id="section-sector" style="margin-bottom:24px;">
         <h3>📊 Sector Rollup (aggregate capital across all funds)</h3>
         ${buildSectorRollup(computed)}
+      </div>
+      <div class="cross-panel" id="section-similarity">
+        <h3>🔗 Fund Similarity</h3>
+        <div class="panel-note">Number of shared CUSIPs between each pair of funds' current top-25 holdings. Darker = more overlap. This reflects current positioning only, not historical co-movement.</div>
+        ${buildFundSimilarity(computed)}
       </div>
     </div>`;
   renderPriceDeltaChart(computed);
@@ -918,6 +1012,7 @@ async function loadData() {
   for (const cik in historyByFund) {
     historyByFund[cik].sort((a, b) => a.period_end.localeCompare(b.period_end));
   }
+  latestHistoryByFund = historyByFund;
 
   const rows = Object.values(latestByFund).sort((a, b) => b.portfolio_value - a.portfolio_value);
   const grid = document.getElementById("fundGrid");
@@ -951,90 +1046,128 @@ async function loadData() {
     });
     tickerTrack.innerHTML = tickItems.join("") + tickItems.join("");
 
-    grid.innerHTML = computed.map(({ f, prior, pct }, i) => {
-      const cls = pct === null ? "" : (pct >= 0 ? "up" : "down");
-      const arrow = pct === null ? "" : (pct >= 0 ? "▲" : "▼");
-      const deltaHtml = pct === null
-        ? '<span style="color:var(--text-faint)">first snapshot on file</span>'
-        : `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}% vs ${prior.period_end}</span>`;
-
-      const topFive = (f.top_holdings || []).slice(0, 5);
-      const chips = topFive.map(h => {
-        if (h.is_new || h.is_increased) {
-          let priceTag = "";
-          if (h.price_estimate && h.price_estimate.pct_change_since_avg !== null) {
-            const pe = h.price_estimate;
-            const cls = pe.pct_change_since_avg >= 0 ? "up" : "down";
-            const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
-            priceTag = ` <span class="${cls}">${arrow}${Math.abs(pe.pct_change_since_avg)}%</span>`;
-          }
-          const chipClass = h.is_new ? "chip-new" : "chip-increased";
-          const badgeClass = h.is_new ? "flag-new" : "flag-increased";
-          const badgeText = h.is_new ? "NEW" : `+${h.pct_share_increase}%`;
-          return `<span class="chip ${chipClass}">${shortName(h.issuer)} ${h.pct_of_portfolio}% <span class="${badgeClass}">${badgeText}</span>${priceTag}</span>`;
-        }
-        return `<span class="chip">${shortName(h.issuer)} ${h.pct_of_portfolio}%</span>`;
-      }).join("");
-
-      const newInThis = (f.top_holdings || []).filter(h => h.is_new).length;
-      const increasedInThis = (f.top_holdings || []).filter(h => h.is_increased).length;
-      let cardClass = "fund-card";
-      if (newInThis > 0) cardClass += " has-new";
-      else if (increasedInThis > 0) cardClass += " has-increased";
-
-      const fullRows = (f.top_holdings || []).map(h => {
-        let badge = "";
-        let rowBg = "";
-        if (h.is_new) {
-          badge = ' <span class="flag-new">NEW</span>';
-          rowBg = ' style="background:rgba(62,213,152,0.06)"';
-        } else if (h.is_increased) {
-          badge = ` <span class="flag-increased">+${h.pct_share_increase}%</span>`;
-          rowBg = ' style="background:rgba(91,157,245,0.06)"';
-        }
-        let priceCell = "";
-        if (h.price_estimate) {
-          const pe = h.price_estimate;
-          const cls = pe.pct_change_since_avg >= 0 ? "up" : "down";
-          const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
-          priceCell = `<span class="${cls}">avg $${pe.avg_price_quarter} → $${pe.current_price} (${arrow}${Math.abs(pe.pct_change_since_avg)}%)</span>`;
-        } else if (h.is_new || h.is_increased) {
-          priceCell = '<span style="color:var(--text-faint)">price estimate unavailable</span>';
-        }
-        return `<tr${rowBg}><td class="tk">${shortName(h.issuer)}${badge}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td><td>${priceCell}</td></tr>`;
-      }).join("");
-
-      return `
-      <div class="${cardClass}" onclick="toggleDetail(${i})">
-        <div class="fund-top">
-          <div>
-            <div class="fund-name">${f.fund_name}</div>
-            <div class="fund-person">${f.person || ""}</div>
-            <div class="fund-meta">Period ${f.period_end}${f.period_end !== globalLatestPeriod ? ` <span class="lag-badge">LAGGING · latest is ${globalLatestPeriod}</span>` : ""} · filed ${f.filed_date} · ${f.num_holdings || "?"} holdings${newInThis > 0 ? ` · <span style="color:var(--green)">${newInThis} new</span>` : ""}${increasedInThis > 0 ? ` · <span style="color:var(--blue)">${increasedInThis} increased</span>` : ""}</div>
-          </div>
-          <div class="fund-aum">
-            <div class="val">${fmtMoney(f.portfolio_value)}</div>
-            <div class="delta">${deltaHtml}</div>
-          </div>
-        </div>
-        <div class="fund-holdings">${chips}</div>
-        <div class="detail" id="detail-${i}">
-          <table class="holdings-table">
-            <tr><th>Ticker / issuer</th><th>% of book</th><th>Value</th><th>New-position estimate</th></tr>
-            ${fullRows}
-          </table>
-          <button onclick="event.stopPropagation(); toggleHistory(${i})" style="margin-top:12px;background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 10px;cursor:pointer;">📈 Position history</button>
-          <div id="history-${i}" style="display:none;overflow-x:auto;">
-            ${buildHistoryTable(f, historyByFund[f.cik])}
-          </div>
-        </div>
-      </div>`;
-    }).join("");
+    renderFundGrid();
 
     renderCrossFundDashboard(computed, data);
   }
 
   document.getElementById("lastUpdated").textContent = "Last loaded " + new Date().toLocaleString();
+}
+
+function applySortFilter() {
+  currentSort = document.getElementById("sortSelect").value;
+  currentActiveOnly = document.getElementById("activeOnlyCheckbox").checked;
+  renderFundGrid();
+}
+
+function renderFundGrid() {
+  const grid = document.getElementById("fundGrid");
+  if (!grid || latestComputed.length === 0) return;
+
+  const globalLatestPeriod = latestComputed.reduce((max, { f }) => f.period_end > max ? f.period_end : max, "");
+
+  let rows = latestComputed.slice();
+
+  if (currentActiveOnly) {
+    rows = rows.filter(({ f }) => (f.top_holdings || []).some(h => h.is_new || h.is_increased));
+  }
+
+  if (currentSort === "new") {
+    rows.sort((a, b) => {
+      const aCount = (a.f.top_holdings || []).filter(h => h.is_new).length;
+      const bCount = (b.f.top_holdings || []).filter(h => h.is_new).length;
+      return bCount - aCount;
+    });
+  } else if (currentSort === "alpha") {
+    rows.sort((a, b) => a.f.fund_name.localeCompare(b.f.fund_name));
+  } else {
+    rows.sort((a, b) => b.f.portfolio_value - a.f.portfolio_value);
+  }
+
+  if (rows.length === 0) {
+    grid.innerHTML = '<div class="empty">No funds match the current filter.</div>';
+    return;
+  }
+
+  grid.innerHTML = rows.map(({ f, prior, pct }, i) => {
+    const cls = pct === null ? "" : (pct >= 0 ? "up" : "down");
+    const arrow = pct === null ? "" : (pct >= 0 ? "▲" : "▼");
+    const deltaHtml = pct === null
+      ? '<span style="color:var(--text-faint)">first snapshot on file</span>'
+      : `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}% vs ${prior.period_end}</span>`;
+
+    const topFive = (f.top_holdings || []).slice(0, 5);
+    const chips = topFive.map(h => {
+      if (h.is_new || h.is_increased) {
+        let priceTag = "";
+        if (h.price_estimate && h.price_estimate.pct_change_since_avg !== null) {
+          const pe = h.price_estimate;
+          const cls = pe.pct_change_since_avg >= 0 ? "up" : "down";
+          const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
+          priceTag = ` <span class="${cls}">${arrow}${Math.abs(pe.pct_change_since_avg)}%</span>`;
+        }
+        const chipClass = h.is_new ? "chip-new" : "chip-increased";
+        const badgeClass = h.is_new ? "flag-new" : "flag-increased";
+        const badgeText = h.is_new ? "NEW" : `+${h.pct_share_increase}%`;
+        return `<span class="chip ${chipClass}">${shortName(h.issuer)} ${h.pct_of_portfolio}% <span class="${badgeClass}">${badgeText}</span>${priceTag}</span>`;
+      }
+      return `<span class="chip">${shortName(h.issuer)} ${h.pct_of_portfolio}%</span>`;
+    }).join("");
+
+    const newInThis = (f.top_holdings || []).filter(h => h.is_new).length;
+    const increasedInThis = (f.top_holdings || []).filter(h => h.is_increased).length;
+    let cardClass = "fund-card";
+    if (newInThis > 0) cardClass += " has-new";
+    else if (increasedInThis > 0) cardClass += " has-increased";
+
+    const fullRows = (f.top_holdings || []).map(h => {
+      let badge = "";
+      let rowBg = "";
+      if (h.is_new) {
+        badge = ' <span class="flag-new">NEW</span>';
+        rowBg = ' style="background:rgba(62,213,152,0.06)"';
+      } else if (h.is_increased) {
+        badge = ` <span class="flag-increased">+${h.pct_share_increase}%</span>`;
+        rowBg = ' style="background:rgba(91,157,245,0.06)"';
+      }
+      let priceCell = "";
+      if (h.price_estimate) {
+        const pe = h.price_estimate;
+        const cls = pe.pct_change_since_avg >= 0 ? "up" : "down";
+        const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
+        priceCell = `<span class="${cls}">avg $${pe.avg_price_quarter} → $${pe.current_price} (${arrow}${Math.abs(pe.pct_change_since_avg)}%)</span>`;
+      } else if (h.is_new || h.is_increased) {
+        priceCell = '<span style="color:var(--text-faint)">price estimate unavailable</span>';
+      }
+      return `<tr${rowBg}><td class="tk">${shortName(h.issuer)}${badge}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td><td>${priceCell}</td></tr>`;
+    }).join("");
+
+    return `
+    <div class="${cardClass}" onclick="toggleDetail(${i})">
+      <div class="fund-top">
+        <div>
+          <div class="fund-name">${f.fund_name}</div>
+          <div class="fund-person">${f.person || ""}</div>
+          <div class="fund-meta">Period ${f.period_end}${f.period_end !== globalLatestPeriod ? ` <span class="lag-badge">LAGGING · latest is ${globalLatestPeriod}</span>` : ""} · filed ${f.filed_date} · ${f.num_holdings || "?"} holdings${newInThis > 0 ? ` · <span style="color:var(--green)">${newInThis} new</span>` : ""}${increasedInThis > 0 ? ` · <span style="color:var(--blue)">${increasedInThis} increased</span>` : ""}</div>
+        </div>
+        <div class="fund-aum">
+          <div class="val">${fmtMoney(f.portfolio_value)}</div>
+          <div class="delta">${deltaHtml}</div>
+        </div>
+      </div>
+      <div class="fund-holdings">${chips}</div>
+      <div class="detail" id="detail-${i}">
+        <table class="holdings-table">
+          <tr><th>Ticker / issuer</th><th>% of book</th><th>Value</th><th>New-position estimate</th></tr>
+          ${fullRows}
+        </table>
+        <button onclick="event.stopPropagation(); toggleHistory(${i})" style="margin-top:12px;background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 10px;cursor:pointer;">📈 Position history</button>
+        <div id="history-${i}" style="display:none;overflow-x:auto;">
+          ${buildHistoryTable(f, latestHistoryByFund[f.cik])}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
 }
 
 function toggleDetail(i) {
