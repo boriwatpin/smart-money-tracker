@@ -71,30 +71,41 @@ def cusip_to_ticker(cusip, cache):
 
     13F filings only disclose CUSIPs, not tickers. This lookup can fail for
     thinly-traded securities, foreign issuers, or CUSIPs OpenFIGI doesn't
-    recognize -- that's expected and handled by the caller.
+    recognize -- that's expected. OpenFIGI's anonymous tier also has a low
+    rate limit, so a 429 gets a couple of backoff-and-retry attempts before
+    giving up, rather than being treated as a permanent failure.
     """
     if cusip in cache:
         return cache[cusip]
-    try:
-        r = requests.post(
-            "https://api.openfigi.com/v3/mapping",
-            json=[{"idType": "ID_CUSIP", "idValue": cusip}],
-            headers={"Content-Type": "application/json"},
-            timeout=15,
-        )
-        r.raise_for_status()
-        result = r.json()
-        ticker = None
-        if result and isinstance(result, list) and result[0].get("data"):
-            ticker = result[0]["data"][0].get("ticker")
-        if not ticker:
-            print(f"[debug] OpenFIGI found no ticker for CUSIP {cusip}: {result}")
-        cache[cusip] = ticker
-        return ticker
-    except Exception as e:
-        print(f"[debug] OpenFIGI lookup exception for CUSIP {cusip}: {e}")
-        cache[cusip] = None
-        return None
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                "https://api.openfigi.com/v3/mapping",
+                json=[{"idType": "ID_CUSIP", "idValue": cusip}],
+                headers={"Content-Type": "application/json"},
+                timeout=15,
+            )
+            if r.status_code == 429:
+                wait = 4 * (attempt + 1)
+                print(f"[debug] OpenFIGI rate limited on CUSIP {cusip}, waiting {wait}s (attempt {attempt + 1}/3)")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            result = r.json()
+            ticker = None
+            if result and isinstance(result, list) and result[0].get("data"):
+                ticker = result[0]["data"][0].get("ticker")
+            if not ticker:
+                print(f"[debug] OpenFIGI found no ticker for CUSIP {cusip}: {result}")
+            cache[cusip] = ticker
+            return ticker
+        except Exception as e:
+            print(f"[debug] OpenFIGI lookup exception for CUSIP {cusip}: {e}")
+            cache[cusip] = None
+            return None
+    print(f"[debug] OpenFIGI still rate-limited after retries, giving up on CUSIP {cusip}")
+    cache[cusip] = None
+    return None
 
 
 def quarter_start_iso(period_end_str):
@@ -103,10 +114,20 @@ def quarter_start_iso(period_end_str):
     return date(d.year, q_month, 1).isoformat()
 
 
+STOOQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+}
+
+
 def fetch_daily_closes(ticker):
-    """Pull daily closing prices from Stooq (free, no API key required)."""
+    """Pull daily closing prices from Stooq (free, no API key required).
+
+    Stooq appears to reject requests without a browser-like User-Agent
+    (returns 404 instead of the CSV) -- a bare Python/requests default
+    User-Agent gets blocked.
+    """
     url = f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d"
-    r = requests.get(url, timeout=15)
+    r = requests.get(url, headers=STOOQ_HEADERS, timeout=15)
     r.raise_for_status()
     lines = r.text.strip().splitlines()
     rows = []
@@ -313,14 +334,16 @@ def process_filing(fund, latest, figi_cache):
 
         # Only spend API calls on genuinely new or meaningfully-increased
         # positions -- this is where a price estimate is actually meaningful.
-        if (is_new or is_increased) and priced_count < 20:  # shared cap per fund per run
+        if (is_new or is_increased) and priced_count < 15:  # shared cap per fund per run
             ticker = cusip_to_ticker(h["cusip"], figi_cache)
-            if ticker:
+            if ticker and re.fullmatch(r"[A-Za-z.\-]{1,6}", ticker):
                 price_info = estimate_price_for_period(ticker, latest["period"])
                 if price_info:
                     entry["price_estimate"] = price_info
+            elif ticker:
+                print(f"[debug] skipping non-equity-looking ticker '{ticker}' (likely a bond, not a stock)")
             priced_count += 1
-            time.sleep(0.25)
+            time.sleep(1.5)
 
         if is_new:
             new_count += 1
