@@ -308,3 +308,73 @@ def process_filing(fund, latest, figi_cache):
 
         is_increased = False
         if not is_new and is_new_quarter and h["cusip"] in prior_by_cusip:
+            prior_shares = prior_by_cusip[h["cusip"]].get("shares") or 0
+            if prior_shares > 0:
+                shares_added = h["shares"] - prior_shares
+                pct_share_increase = (shares_added / prior_shares) * 100
+                # 15%+ more shares is the bar for "meaningfully increased" --
+                # small share creep from options/DRIP-like adjustments isn't
+                # worth flagging as a notable buy.
+                if shares_added > 0 and pct_share_increase >= 15:
+                    is_increased = True
+                    entry["shares_added"] = shares_added
+                    entry["pct_share_increase"] = round(pct_share_increase, 1)
+        entry["is_increased"] = is_increased
+
+        # Only spend API calls on genuinely new or meaningfully-increased
+        # positions -- this is where a price estimate is actually meaningful.
+        if (is_new or is_increased) and priced_count < 15:  # shared cap per fund per run
+            ticker = cusip_to_ticker(h["cusip"], figi_cache)
+            if ticker and re.fullmatch(r"[A-Za-z.\-]{1,6}", ticker):
+                price_info = estimate_price_for_period(ticker, latest["period"])
+                if price_info:
+                    entry["price_estimate"] = price_info
+            elif ticker:
+                print(f"[debug] skipping non-equity-looking ticker '{ticker}' (likely a bond, not a stock)")
+            priced_count += 1
+            time.sleep(0.8)
+
+        if is_new:
+            new_count += 1
+        if is_increased:
+            increased_count += 1
+
+        top_out.append(entry)
+
+    row = {
+        "fund_name": fund["name"],
+        "person": fund["person"],
+        "cik": fund["cik"],
+        "period_end": latest["period"],
+        "filed_date": latest["filed"],
+        "portfolio_value": total_value,
+        "num_holdings": len(holdings),
+        "top_holdings": top_out,
+        "source_accession": latest["accession"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    upsert_snapshot(row)
+    print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings, {new_count} new, {increased_count} increased, {priced_count} priced)")
+
+
+def main():
+    figi_cache = {}
+
+    for fund in FUNDS:
+        try:
+            filings = recent_13f_filings(fund["cik"], n=2)
+            if not filings:
+                print(f"[skip] no 13F-HR found for {fund['name']}")
+                continue
+
+            # Process oldest first so it's already stored as the "prior"
+            # snapshot by the time we process the newer one.
+            for filing in reversed(filings):
+                process_filing(fund, filing, figi_cache)
+                time.sleep(0.3)  # be polite to SEC's rate limits
+        except Exception as e:
+            print(f"[error] {fund['name']}: {e}")
+
+
+if __name__ == "__main__":
+    main()
