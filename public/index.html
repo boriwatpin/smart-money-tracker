@@ -20,8 +20,15 @@
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
 
   .layout{display:flex;max-width:1400px;margin:0 auto;}
-  .side-nav{position:sticky;top:0;align-self:flex-start;height:100vh;width:200px;flex-shrink:0;border-right:1px solid var(--border);padding:20px 10px;overflow-y:auto;transition:width .15s;}
+  .side-nav{position:sticky;top:0;align-self:flex-start;height:100vh;height:100dvh;width:200px;flex-shrink:0;border-right:1px solid var(--border);padding:20px 10px;overflow-y:auto;transition:width .15s;background:var(--bg);}
   .side-nav.collapsed{width:54px;}
+  @media(max-width:768px){
+    .side-nav:not(.collapsed){position:fixed;top:0;left:0;height:100vh;height:100dvh;width:230px;z-index:20;box-shadow:4px 0 24px rgba(0,0,0,0.5);}
+    .nav-item{padding:11px 8px;}
+    .nav-toggle{width:36px;height:36px;}
+  }
+  .nav-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:19;}
+  .nav-backdrop.show{display:block;}
   .nav-toggle{background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);width:30px;height:30px;cursor:pointer;margin-bottom:18px;font-size:14px;font-family:'IBM Plex Mono',monospace;}
   .nav-toggle:hover{border-color:var(--amber-dim);color:var(--text);}
   .nav-item{display:flex;align-items:center;gap:10px;padding:8px;color:var(--text-dim);text-decoration:none;border-left:2px solid transparent;font-size:12px;white-space:nowrap;overflow:hidden;margin-bottom:2px;cursor:pointer;}
@@ -29,7 +36,6 @@
   .nav-item.active{color:var(--amber);border-left-color:var(--amber);}
   .nav-icon{flex-shrink:0;width:16px;text-align:center;font-size:13px;}
   .side-nav.collapsed .nav-label{display:none;}
-  @media(max-width:768px){.side-nav{position:fixed;z-index:10;background:var(--bg);}}
 
   .app{flex:1;min-width:0;max-width:1180px;padding:28px 20px 60px;}
 
@@ -133,6 +139,8 @@
 </head>
 <body>
 <div class="layout">
+
+  <div class="nav-backdrop" id="navBackdrop" onclick="toggleNav()"></div>
 
   <nav class="side-nav" id="sideNav">
     <button class="nav-toggle" onclick="toggleNav()" aria-label="Toggle navigation">☰</button>
@@ -248,7 +256,16 @@ let currentActiveOnly = false;
 const navCounts = {};
 
 function toggleNav() {
-  document.getElementById("sideNav").classList.toggle("collapsed");
+  const nav = document.getElementById("sideNav");
+  nav.classList.toggle("collapsed");
+  syncNavBackdrop();
+}
+
+function syncNavBackdrop() {
+  const nav = document.getElementById("sideNav");
+  const backdrop = document.getElementById("navBackdrop");
+  const isExpandedOnMobile = !nav.classList.contains("collapsed") && window.innerWidth < 768;
+  backdrop.classList.toggle("show", isExpandedOnMobile);
 }
 
 function goToSection(id) {
@@ -256,6 +273,12 @@ function goToSection(id) {
   if (el) {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveNav(id);
+  }
+  // On mobile the nav is a full overlay drawer -- close it after picking a
+  // section so it doesn't sit on top of the content you just navigated to.
+  if (window.innerWidth < 768) {
+    document.getElementById("sideNav").classList.add("collapsed");
+    syncNavBackdrop();
   }
 }
 
