@@ -17,9 +17,9 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
-  .app{max-width:1100px;margin:0 auto;padding:28px 20px 60px;}
+  .app{max-width:1180px;margin:0 auto;padding:28px 20px 60px;}
 
-  .masthead{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px;flex-wrap:wrap;gap:16px;}
+  .masthead{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:0;flex-wrap:wrap;gap:16px;}
   .masthead h1{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:26px;margin:0;letter-spacing:-0.02em;}
   .masthead h1 span{color:var(--amber);}
   .masthead .sub{color:var(--text-dim);font-size:13px;margin-top:4px;}
@@ -29,6 +29,17 @@
   .clock .deadline-date{font-size:12.5px;color:var(--text-dim);margin-top:2px;}
   .clock .countdown{font-size:22px;font-weight:600;color:var(--amber);margin-top:4px;letter-spacing:.02em;}
 
+  .ticker-wrap{overflow:hidden;background:var(--panel);border:1px solid var(--border);border-top:none;margin-bottom:22px;position:relative;}
+  .ticker-wrap::before,.ticker-wrap::after{content:"";position:absolute;top:0;bottom:0;width:32px;z-index:2;pointer-events:none;}
+  .ticker-wrap::before{left:0;background:linear-gradient(90deg,var(--panel),transparent);}
+  .ticker-wrap::after{right:0;background:linear-gradient(270deg,var(--panel),transparent);}
+  .ticker{display:flex;white-space:nowrap;animation:scroll 42s linear infinite;font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:10px 0;}
+  .ticker:hover{animation-play-state:paused;}
+  .tick-item{padding:0 22px;border-right:1px solid var(--border-soft);color:var(--text-dim);}
+  .tick-item b{color:var(--text);font-weight:500;}
+  .tick-up{color:var(--green);} .tick-down{color:var(--red);}
+  @keyframes scroll{0%{transform:translateX(0);}100%{transform:translateX(-50%);}}
+
   .status-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text-faint);margin-bottom:18px;font-family:'IBM Plex Mono',monospace;}
   .status-row button{background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:6px 12px;cursor:pointer;}
   .status-row button:hover{border-color:var(--amber-dim);color:var(--text);}
@@ -37,7 +48,8 @@
   .note-bar b{color:var(--text);}
 
   .fund-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
-  .fund-card{background:var(--panel);border:1px solid var(--border);padding:18px;}
+  .fund-card{background:var(--panel);border:1px solid var(--border);padding:18px;cursor:pointer;transition:border-color .15s;}
+  .fund-card:hover{border-color:var(--amber-dim);}
   .fund-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;}
   .fund-name{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:16px;}
   .fund-person{font-size:11.5px;color:var(--text-faint);margin-top:2px;}
@@ -46,11 +58,18 @@
   .fund-aum .val{font-size:17px;font-weight:500;}
   .fund-aum .delta{font-size:11.5px;margin-top:2px;}
   .up{color:var(--green);} .down{color:var(--red);}
-  .holdings-table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:10px;}
+
+  .fund-holdings{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}
+  .chip{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--panel-2);border:1px solid var(--border-soft);padding:3px 8px;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px;}
+  .flag-new{color:var(--green);font-size:9.5px;border:1px solid var(--green-dim);padding:1px 4px;letter-spacing:.03em;}
+
+  .detail{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);}
+  .detail.open{display:block;}
+  .holdings-table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;}
   .holdings-table th{text-align:left;color:var(--text-faint);font-weight:500;padding:5px 4px;border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.04em;}
   .holdings-table td{padding:5px 4px;border-bottom:1px solid var(--border-soft);color:var(--text-dim);}
   .holdings-table td.tk{color:var(--text);font-weight:500;}
-  .empty{padding:40px;text-align:center;color:var(--text-faint);font-size:13px;}
+  .empty{padding:40px;text-align:center;color:var(--text-faint);font-size:13px;grid-column:1/-1;}
 </style>
 </head>
 <body>
@@ -68,13 +87,17 @@
     </div>
   </div>
 
+  <div class="ticker-wrap">
+    <div class="ticker" id="tickerTrack">Loading…</div>
+  </div>
+
   <div class="status-row">
     <span id="lastUpdated">Loading data…</span>
     <button onclick="loadData()">↻ Refresh</button>
   </div>
 
   <div class="note-bar">
-    <b>How to read this:</b> "Value Δ Q/Q" is the change in total reported 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss that mixes real trading gains, new capital, and market price moves (13F filings don't disclose entry price or realized P&amp;L). 13F filings are due 45 calendar days after each quarter-end and are the same deadline for every filer: Feb 14, May 15, Aug 14, Nov 14 (next business day if it falls on a weekend/holiday). Data below refreshes daily via a scheduled job that reads directly from SEC EDGAR.
+    <b>How to read this:</b> Click a card to see full top holdings. "Value Δ Q/Q" is the change in total 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss (13F filings don't disclose entry price or realized P&amp;L, so this mixes trading activity with market moves). A <span class="flag-new" style="padding:1px 5px;">NEW</span> badge means the fund didn't hold that CUSIP last quarter. For NEW positions only, we estimate an entry price as the <i>average daily closing price during the quarter they reported buying it</i> (SEC doesn't disclose the exact purchase date), compared to today's price — this is a rough approximation, not a real cost basis. No estimate is shown for pre-existing positions since there's no reliable way to infer their cost basis at all. 13F filings are due 45 days after quarter-end: Feb 14, May 15, Aug 14, Nov 14.
   </div>
 
   <div class="fund-grid" id="fundGrid">
@@ -87,13 +110,13 @@
 <script>
 // ---- CONFIG: fill these in with your own Supabase project values ----
 const SUPABASE_URL = "https://xgjsyrvmevjzvpggkomo.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_-47gqsHgjFLhPIyX-Y6m6Q_1O9A8lqy";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnanN5cnZtZXZqenZwZ2drb21vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyMzk3ODUsImV4cCI6MjEwMjgxNTc4NX0.kVCvQo1aaAN87Sb4udZ6sf1RYz78K_FseeF_KJjL7O8";
 // -----------------------------------------------------------------------
 
 let supabaseClient = null;
-   if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
-     supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-   }
+if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
 
 function nextDeadline(now) {
   const year = now.getUTCFullYear();
@@ -128,18 +151,23 @@ function renderClock() {
 function fmtMoney(n) {
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
-  return "$" + n.toLocaleString();
+  return "$" + Number(n).toLocaleString();
+}
+
+function shortName(issuer) {
+  return (issuer || "").replace(/\s+(INC|CORP|CO|LLC|LTD|PLC|SA|LP|TR|DEL)\.?$/i, "").trim();
 }
 
 async function loadData() {
   document.getElementById("lastUpdated").textContent = "Loading data…";
- if (!supabaseClient) {
-     document.getElementById("lastUpdated").textContent = "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html.";
-     return;
-   }
+  if (!supabaseClient) {
+    document.getElementById("lastUpdated").textContent = "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html.";
+    document.getElementById("tickerTrack").textContent = "Not connected to Supabase yet.";
+    return;
+  }
 
-   const { data, error } = await supabaseClient
-     .from("fund_snapshots")
+  const { data, error } = await supabaseClient
+    .from("fund_snapshots")
     .select("*")
     .order("period_end", { ascending: false });
 
@@ -160,45 +188,91 @@ async function loadData() {
 
   const rows = Object.values(latestByFund).sort((a, b) => b.portfolio_value - a.portfolio_value);
   const grid = document.getElementById("fundGrid");
+  const tickerTrack = document.getElementById("tickerTrack");
 
   if (rows.length === 0) {
     grid.innerHTML = '<div class="empty">No snapshots yet. Run the GitHub Action once (Actions tab → Refresh 13F data → Run workflow) to populate Supabase.</div>';
+    tickerTrack.textContent = "No data yet.";
   } else {
-    grid.innerHTML = rows.map(f => {
+    // Precompute deltas once so the ticker and cards agree
+    const computed = rows.map(f => {
       const prior = priorByFund[f.cik];
-      let deltaHtml = '<span style="color:var(--text-faint)">first snapshot on file</span>';
+      let pct = null;
       if (prior && prior.portfolio_value) {
-        const pct = ((f.portfolio_value - prior.portfolio_value) / prior.portfolio_value) * 100;
-        const cls = pct >= 0 ? "up" : "down";
-        const arrow = pct >= 0 ? "▲" : "▼";
-        deltaHtml = `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}% vs ${prior.period_end}</span>`;
+        pct = ((f.portfolio_value - prior.portfolio_value) / prior.portfolio_value) * 100;
       }
-      const holdingsRows = (f.top_holdings || []).slice(0, 5).map(h =>
-        `<tr><td class="tk">${h.issuer}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td></tr>`
-      ).join("");
+      return { f, prior, pct };
+    });
+
+    // Ticker tape
+    const tickItems = computed.map(({ f, pct }) => {
+      if (pct === null) {
+        return `<span class="tick-item"><b>${f.fund_name}</b> AUM ${fmtMoney(f.portfolio_value)} <span style="color:var(--text-faint)">first snapshot</span></span>`;
+      }
+      const cls = pct >= 0 ? "tick-up" : "tick-down";
+      const arrow = pct >= 0 ? "▲" : "▼";
+      return `<span class="tick-item"><b>${f.fund_name}</b> AUM ${fmtMoney(f.portfolio_value)} <span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}%</span></span>`;
+    });
+    tickerTrack.innerHTML = tickItems.join("") + tickItems.join("");
+
+    // Cards
+    grid.innerHTML = computed.map(({ f, prior, pct }, i) => {
+      const cls = pct === null ? "" : (pct >= 0 ? "up" : "down");
+      const arrow = pct === null ? "" : (pct >= 0 ? "▲" : "▼");
+      const deltaHtml = pct === null
+        ? '<span style="color:var(--text-faint)">first snapshot on file</span>'
+        : `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}% vs ${prior.period_end}</span>`;
+
+      const topFive = (f.top_holdings || []).slice(0, 5);
+      const chips = topFive.map(h => {
+        const badge = h.is_new ? '<span class="flag-new">NEW</span>' : "";
+        return `<span class="chip">${shortName(h.issuer)} ${h.pct_of_portfolio}%${badge}</span>`;
+      }).join("");
+
+      const fullRows = (f.top_holdings || []).map(h => {
+        const badge = h.is_new ? ' <span class="flag-new">NEW</span>' : "";
+        let priceCell = "";
+        if (h.price_estimate) {
+          const pe = h.price_estimate;
+          const cls = pe.pct_change_since_avg >= 0 ? "up" : "down";
+          const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
+          priceCell = `<span class="${cls}">avg $${pe.avg_price_quarter} → $${pe.current_price} (${arrow}${Math.abs(pe.pct_change_since_avg)}%)</span>`;
+        } else if (h.is_new) {
+          priceCell = '<span style="color:var(--text-faint)">price estimate unavailable</span>';
+        }
+        return `<tr><td class="tk">${shortName(h.issuer)}${badge}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td><td>${priceCell}</td></tr>`;
+      }).join("");
 
       return `
-      <div class="fund-card">
+      <div class="fund-card" onclick="toggleDetail(${i})">
         <div class="fund-top">
           <div>
             <div class="fund-name">${f.fund_name}</div>
             <div class="fund-person">${f.person || ""}</div>
-            <div class="fund-meta">Period ${f.period_end} · filed ${f.filed_date}</div>
+            <div class="fund-meta">Period ${f.period_end} · filed ${f.filed_date} · ${f.num_holdings || "?"} holdings</div>
           </div>
           <div class="fund-aum">
             <div class="val">${fmtMoney(f.portfolio_value)}</div>
             <div class="delta">${deltaHtml}</div>
           </div>
         </div>
-        <table class="holdings-table">
-          <tr><th>Ticker / issuer</th><th>% of book</th><th>Value</th></tr>
-          ${holdingsRows}
-        </table>
+        <div class="fund-holdings">${chips}</div>
+        <div class="detail" id="detail-${i}">
+          <table class="holdings-table">
+            <tr><th>Ticker / issuer</th><th>% of book</th><th>Value</th><th>New-position estimate</th></tr>
+            ${fullRows}
+          </table>
+        </div>
       </div>`;
     }).join("");
   }
 
   document.getElementById("lastUpdated").textContent = "Last loaded " + new Date().toLocaleString();
+}
+
+function toggleDetail(i) {
+  const el = document.getElementById("detail-" + i);
+  if (el) el.classList.toggle("open");
 }
 
 renderClock();
