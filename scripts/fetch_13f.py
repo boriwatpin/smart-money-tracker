@@ -87,9 +87,12 @@ def cusip_to_ticker(cusip, cache):
         ticker = None
         if result and isinstance(result, list) and result[0].get("data"):
             ticker = result[0]["data"][0].get("ticker")
+        if not ticker:
+            print(f"[debug] OpenFIGI found no ticker for CUSIP {cusip}: {result}")
         cache[cusip] = ticker
         return ticker
-    except Exception:
+    except Exception as e:
+        print(f"[debug] OpenFIGI lookup exception for CUSIP {cusip}: {e}")
         cache[cusip] = None
         return None
 
@@ -131,10 +134,12 @@ def estimate_price_for_period(ticker, period_end_str):
     try:
         series = fetch_daily_closes(ticker)
         if not series:
+            print(f"[debug] Stooq returned no price data for ticker {ticker}")
             return None
         q_start = quarter_start_iso(period_end_str)
         in_quarter = [row["close"] for row in series if q_start <= row["date"] <= period_end_str]
         if not in_quarter:
+            print(f"[debug] no {period_end_str}-quarter prices found for {ticker} (have {len(series)} rows, range {series[0]['date']} to {series[-1]['date']})")
             return None
         avg_price = sum(in_quarter) / len(in_quarter)
         current_price = series[-1]["close"]
@@ -146,7 +151,8 @@ def estimate_price_for_period(ticker, period_end_str):
             "pct_change_since_avg": round(pct_change, 2) if pct_change is not None else None,
             "price_as_of": series[-1]["date"],
         }
-    except Exception:
+    except Exception as e:
+        print(f"[debug] price estimation exception for ticker {ticker}: {e}")
         return None
 
 
