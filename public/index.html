@@ -14,6 +14,7 @@
     --amber:#E8B44C; --amber-dim:#8A6A2C;
     --green:#3ED598; --green-dim:#1F6B4C;
     --red:#FF5C5C; --red-dim:#7A2E2E;
+    --blue:#5B9DF5; --blue-dim:#2C4A7A;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
@@ -52,6 +53,8 @@
   .fund-card:hover{border-color:var(--amber-dim);}
   .fund-card.has-new{border-left:3px solid var(--green-dim);}
   .fund-card.has-new:hover{border-color:var(--green);}
+  .fund-card.has-increased{border-left:3px solid var(--blue-dim);}
+  .fund-card.has-increased:hover{border-color:var(--blue);}
   .fund-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;}
   .fund-name{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:16px;}
   .fund-person{font-size:11.5px;color:var(--text-faint);margin-top:2px;}
@@ -64,7 +67,9 @@
   .fund-holdings{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}
   .chip{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--panel-2);border:1px solid var(--border-soft);padding:3px 8px;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px;}
   .chip-new{border-color:var(--green-dim);background:rgba(62,213,152,0.08);}
+  .chip-increased{border-color:var(--blue-dim);background:rgba(91,157,245,0.08);}
   .flag-new{color:var(--green);font-size:9.5px;border:1px solid var(--green-dim);padding:1px 4px;letter-spacing:.03em;}
+  .flag-increased{color:var(--blue);font-size:9.5px;border:1px solid var(--blue-dim);padding:1px 4px;letter-spacing:.03em;}
 
   .detail{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft);}
   .detail.open{display:block;}
@@ -100,7 +105,7 @@
   </div>
 
   <div class="note-bar">
-    <b>How to read this:</b> Click a card to see full top holdings. "Value Δ Q/Q" is the change in total 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss (13F filings don't disclose entry price or realized P&amp;L, so this mixes trading activity with market moves). A <span class="flag-new" style="padding:1px 5px;">NEW</span> badge means the fund didn't hold that CUSIP last quarter. For NEW positions only, we estimate an entry price as the <i>average daily closing price during the quarter they reported buying it</i> (SEC doesn't disclose the exact purchase date), compared to today's price — this is a rough approximation, not a real cost basis. No estimate is shown for pre-existing positions since there's no reliable way to infer their cost basis at all. 13F filings are due 45 days after quarter-end: Feb 14, May 15, Aug 14, Nov 14.
+    <b>How to read this:</b> Click a card to see full top holdings. "Value Δ Q/Q" is the change in total 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss (13F filings don't disclose entry price or realized P&amp;L, so this mixes trading activity with market moves). A <span class="flag-new" style="padding:1px 5px;">NEW</span> badge means the fund didn't hold that CUSIP last quarter; a <span class="flag-increased" style="padding:1px 5px;">+X%</span> badge means an existing position grew by 15% or more in share count. For both, we estimate a price as the <i>average daily closing price during the quarter</i> (SEC doesn't disclose exact trade dates) compared to today's price — a rough approximation, not a real cost basis. No estimate is shown for stable existing positions since there's no reliable way to infer their original cost basis at all. 13F filings are due 45 days after quarter-end: Feb 14, May 15, Aug 14, Nov 14.
   </div>
 
   <div class="fund-grid" id="fundGrid">
@@ -112,8 +117,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ---- CONFIG: fill these in with your own Supabase project values ----
-const SUPABASE_URL = "https://xgjsyrvmevjzvpggkomo.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnanN5cnZtZXZqenZwZ2drb21vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyMzk3ODUsImV4cCI6MjEwMjgxNTc4NX0.kVCvQo1aaAN87Sb4udZ6sf1RYz78K_FseeF_KJjL7O8";
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
 // -----------------------------------------------------------------------
 
 let supabaseClient = null;
@@ -228,7 +233,7 @@ async function loadData() {
 
       const topFive = (f.top_holdings || []).slice(0, 5);
       const chips = topFive.map(h => {
-        if (h.is_new) {
+        if (h.is_new || h.is_increased) {
           let priceTag = "";
           if (h.price_estimate && h.price_estimate.pct_change_since_avg !== null) {
             const pe = h.price_estimate;
@@ -236,26 +241,40 @@ async function loadData() {
             const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
             priceTag = ` <span class="${cls}">${arrow}${Math.abs(pe.pct_change_since_avg)}%</span>`;
           }
-          return `<span class="chip chip-new">${shortName(h.issuer)} ${h.pct_of_portfolio}% <span class="flag-new">NEW</span>${priceTag}</span>`;
+          const chipClass = h.is_new ? "chip-new" : "chip-increased";
+          const badgeClass = h.is_new ? "flag-new" : "flag-increased";
+          const badgeText = h.is_new ? "NEW" : `+${h.pct_share_increase}%`;
+          return `<span class="chip ${chipClass}">${shortName(h.issuer)} ${h.pct_of_portfolio}% <span class="${badgeClass}">${badgeText}</span>${priceTag}</span>`;
         }
         return `<span class="chip">${shortName(h.issuer)} ${h.pct_of_portfolio}%</span>`;
       }).join("");
 
       const newInThis = (f.top_holdings || []).filter(h => h.is_new).length;
-      const cardClass = newInThis > 0 ? "fund-card has-new" : "fund-card";
+      const increasedInThis = (f.top_holdings || []).filter(h => h.is_increased).length;
+      let cardClass = "fund-card";
+      if (newInThis > 0) cardClass += " has-new";
+      else if (increasedInThis > 0) cardClass += " has-increased";
 
       const fullRows = (f.top_holdings || []).map(h => {
-        const badge = h.is_new ? ' <span class="flag-new">NEW</span>' : "";
+        let badge = "";
+        let rowBg = "";
+        if (h.is_new) {
+          badge = ' <span class="flag-new">NEW</span>';
+          rowBg = ' style="background:rgba(62,213,152,0.06)"';
+        } else if (h.is_increased) {
+          badge = ` <span class="flag-increased">+${h.pct_share_increase}%</span>`;
+          rowBg = ' style="background:rgba(91,157,245,0.06)"';
+        }
         let priceCell = "";
         if (h.price_estimate) {
           const pe = h.price_estimate;
           const cls = pe.pct_change_since_avg >= 0 ? "up" : "down";
           const arrow = pe.pct_change_since_avg >= 0 ? "▲" : "▼";
           priceCell = `<span class="${cls}">avg $${pe.avg_price_quarter} → $${pe.current_price} (${arrow}${Math.abs(pe.pct_change_since_avg)}%)</span>`;
-        } else if (h.is_new) {
+        } else if (h.is_new || h.is_increased) {
           priceCell = '<span style="color:var(--text-faint)">price estimate unavailable</span>';
         }
-        return `<tr${h.is_new ? ' style="background:rgba(62,213,152,0.06)"' : ''}><td class="tk">${shortName(h.issuer)}${badge}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td><td>${priceCell}</td></tr>`;
+        return `<tr${rowBg}><td class="tk">${shortName(h.issuer)}${badge}</td><td>${h.pct_of_portfolio}%</td><td>${fmtMoney(h.value)}</td><td>${priceCell}</td></tr>`;
       }).join("");
 
       return `
@@ -264,7 +283,7 @@ async function loadData() {
           <div>
             <div class="fund-name">${f.fund_name}</div>
             <div class="fund-person">${f.person || ""}</div>
-            <div class="fund-meta">Period ${f.period_end} · filed ${f.filed_date} · ${f.num_holdings || "?"} holdings${newInThis > 0 ? ` · <span style="color:var(--green)">${newInThis} new</span>` : ""}</div>
+            <div class="fund-meta">Period ${f.period_end} · filed ${f.filed_date} · ${f.num_holdings || "?"} holdings${newInThis > 0 ? ` · <span style="color:var(--green)">${newInThis} new</span>` : ""}${increasedInThis > 0 ? ` · <span style="color:var(--blue)">${increasedInThis} increased</span>` : ""}</div>
           </div>
           <div class="fund-aum">
             <div class="val">${fmtMoney(f.portfolio_value)}</div>
