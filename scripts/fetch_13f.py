@@ -48,13 +48,17 @@ FUNDS = [
 TOP_N_HOLDINGS = 25
 
 
-def get_prior_snapshot(cik):
-    """Look up whatever snapshot is already stored for this fund, if any.
+def get_prior_snapshot(cik, before_period):
+    """Look up the most recent snapshot stored for this fund from BEFORE
+    a given period.
 
-    Used to (a) detect which holdings are new this quarter and (b) avoid
-    re-doing price lookups on days where nothing changed.
+    Critical: must exclude the period currently being processed. Since we
+    reprocess the last 2 quarters on every run, without this exclusion a
+    quarter that's already stored would be found as its own "prior"
+    snapshot once both quarters exist in the table -- silently disabling
+    all new/increased-position detection on every run after the first.
     """
-    url = f"{SUPABASE_URL}/rest/v1/fund_snapshots?cik=eq.{cik}&order=period_end.desc&limit=1"
+    url = f"{SUPABASE_URL}/rest/v1/fund_snapshots?cik=eq.{cik}&period_end=lt.{before_period}&order=period_end.desc&limit=1"
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     r = requests.get(url, headers=headers, timeout=30)
     r.raise_for_status()
@@ -263,8 +267,8 @@ def process_filing(fund, latest, figi_cache):
     top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
 
     # Figure out what's new or meaningfully increased vs. whatever's already stored.
-    prior = get_prior_snapshot(fund["cik"])
-    is_new_quarter = prior is not None and prior.get("period_end") != latest["period"]
+    prior = get_prior_snapshot(fund["cik"], latest["period"])
+    is_new_quarter = prior is not None
     prior_by_cusip = {}
     if is_new_quarter:
         prior_by_cusip = {h.get("cusip"): h for h in (prior.get("top_holdings") or []) if h.get("cusip")}
