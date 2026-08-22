@@ -86,6 +86,7 @@
   @media(max-width:900px){.cross-grid{grid-template-columns:1fr;}}
   .cross-panel{background:var(--panel);border:1px solid var(--border);padding:16px;}
   .cross-panel h3{font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;margin:0 0 10px 0;color:var(--text);}
+  .cross-panel .panel-note{font-size:10.5px;color:var(--text-faint);margin:-6px 0 12px;line-height:1.5;}
   .fund-chip{font-family:'IBM Plex Mono',monospace;font-size:9.5px;background:var(--panel-2);border:1px solid var(--border-soft);padding:1px 5px;color:var(--text-dim);display:inline-block;margin:1px;}
   .fund-chip.buy{border-color:var(--green-dim);color:var(--green);}
   .fund-chip.sell{border-color:var(--red-dim);color:var(--red);}
@@ -94,6 +95,10 @@
   .bar-track{background:var(--panel-2);height:14px;position:relative;border:1px solid var(--border-soft);}
   .bar-fill{background:var(--amber-dim);height:100%;}
   .bar-pct{font-family:'IBM Plex Mono',monospace;color:var(--text-faint);text-align:right;}
+  .conc-row{display:grid;grid-template-columns:150px 1fr 80px;gap:8px;align-items:center;margin-bottom:9px;font-size:11.5px;}
+  .conc-track{background:var(--panel-2);height:16px;position:relative;border:1px solid var(--border-soft);}
+  .conc-outer{background:rgba(232,180,76,0.30);height:100%;position:absolute;left:0;top:0;}
+  .conc-inner{background:var(--amber-dim);height:100%;position:absolute;left:0;top:0;}
   .moves-tab{background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;cursor:pointer;}
   .moves-tab.active{border-color:var(--amber-dim);color:var(--amber);}
 </style>
@@ -135,6 +140,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 // ---- CONFIG: fill these in with your own Supabase project values ----
 const SUPABASE_URL = "https://xgjsyrvmevjzvpggkomo.supabase.co";
@@ -350,6 +356,93 @@ function buildSectorRollup(computed) {
   }).join("");
 }
 
+function buildConcentrationIndex(computed) {
+  const rows = computed.map(({ f }) => {
+    const sorted = (f.top_holdings || []).slice().sort((a, b) => (b.pct_of_portfolio || 0) - (a.pct_of_portfolio || 0));
+    const top5 = sorted.slice(0, 5).reduce((s, h) => s + (h.pct_of_portfolio || 0), 0);
+    const top10 = sorted.slice(0, 10).reduce((s, h) => s + (h.pct_of_portfolio || 0), 0);
+    return { fund: f.fund_name, top5, top10 };
+  }).sort((a, b) => b.top5 - a.top5);
+
+  return rows.map(r => `
+    <div class="conc-row">
+      <div class="bar-label">${r.fund.split(" ").slice(0, 2).join(" ")}</div>
+      <div class="conc-track">
+        <div class="conc-outer" style="width:${Math.min(r.top10, 100).toFixed(1)}%"></div>
+        <div class="conc-inner" style="width:${Math.min(r.top5, 100).toFixed(1)}%"></div>
+      </div>
+      <div class="bar-pct">${r.top5.toFixed(0)}% / ${r.top10.toFixed(0)}%</div>
+    </div>`).join("");
+}
+
+let priceDeltaChartInstance = null;
+
+function renderPriceDeltaChart(computed) {
+  const items = [];
+  computed.forEach(({ f }) => {
+    (f.top_holdings || []).forEach(h => {
+      if ((h.is_new || h.is_increased) && h.price_estimate && h.price_estimate.pct_change_since_avg !== null) {
+        items.push({
+          label: `${f.fund_name.split(" ")[0]} · ${shortName(h.issuer)}`,
+          value: h.price_estimate.pct_change_since_avg,
+        });
+      }
+    });
+  });
+
+  items.sort((a, b) => a.value - b.value);
+
+  let shown = items;
+  if (items.length > 20) {
+    shown = items.slice(0, 10).concat(items.slice(-10));
+  }
+
+  const wrapper = document.getElementById("priceDeltaWrapper");
+  if (priceDeltaChartInstance) {
+    priceDeltaChartInstance.destroy();
+    priceDeltaChartInstance = null;
+  }
+
+  if (shown.length === 0) {
+    wrapper.innerHTML = '<div style="color:var(--text-faint);font-size:11.5px;padding:12px 0;">No priced new/increased positions yet this quarter.</div>';
+    return;
+  }
+
+  const heightPx = Math.max(220, shown.length * 26 + 60);
+  wrapper.style.height = heightPx + "px";
+  wrapper.innerHTML = '<canvas id="priceDeltaChart" role="img" aria-label="Diverging horizontal bar chart showing price change since average estimated cost for new and increased positions this quarter"></canvas>';
+
+  priceDeltaChartInstance = new Chart(document.getElementById("priceDeltaChart"), {
+    type: "bar",
+    data: {
+      labels: shown.map(i => i.label),
+      datasets: [{
+        data: shown.map(i => i.value),
+        backgroundColor: shown.map(i => i.value >= 0 ? "rgba(62,213,152,0.7)" : "rgba(255,92,92,0.7)"),
+        borderRadius: 2,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: 10 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.raw >= 0 ? "+" : ""}${ctx.raw}% since avg cost`,
+          },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: "Price change since avg cost (%)", color: "#5B6572", font: { size: 10 } }, ticks: { color: "#8B95A5", font: { size: 10 } }, grid: { color: "#1A2029" } },
+        y: { ticks: { color: "#8B95A5", font: { size: 10 } }, grid: { display: false } },
+      },
+    },
+  });
+}
+
 function passesMoveFilter(e) {
   if ((e.pct || 0) <= 1) return false;
   if ((e.type === "new" || e.type === "increased") && e.price && e.price.pct_change_since_avg !== null) {
@@ -519,6 +612,16 @@ function renderCrossFundDashboard(computed, allData) {
         </div>
       </div>
       <div class="cross-panel" style="margin-bottom:24px;">
+        <h3>📐 Portfolio Concentration (Top 5% / Top 10% of book)</h3>
+        <div class="panel-note">Distinguishes high-conviction stock-pickers (top 5 holdings &gt;50% of book) from diversified allocators (top 5 &lt;10%). Computed against each fund's full reported portfolio, not just the stored top 25.</div>
+        ${buildConcentrationIndex(computed)}
+      </div>
+      <div class="cross-panel" style="margin-bottom:24px;">
+        <h3>📉 Price Delta — new &amp; increased positions this quarter</h3>
+        <div class="panel-note">How far each priced position has moved since its estimated average cost. Green = up since buying, red = down. Only covers positions we could resolve a ticker and price for.</div>
+        <div id="priceDeltaWrapper" style="position:relative;height:280px;"></div>
+      </div>
+      <div class="cross-panel" style="margin-bottom:24px;">
         <h3>📰 Notable Moves</h3>
         ${renderMovesFeed(allData)}
       </div>
@@ -527,6 +630,7 @@ function renderCrossFundDashboard(computed, allData) {
         ${buildSectorRollup(computed)}
       </div>
     </div>`;
+  renderPriceDeltaChart(computed);
 }
 
 async function loadData() {
