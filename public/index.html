@@ -94,6 +94,8 @@
   .bar-track{background:var(--panel-2);height:14px;position:relative;border:1px solid var(--border-soft);}
   .bar-fill{background:var(--amber-dim);height:100%;}
   .bar-pct{font-family:'IBM Plex Mono',monospace;color:var(--text-faint);text-align:right;}
+  .moves-tab{background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 12px;cursor:pointer;}
+  .moves-tab.active{border-color:var(--amber-dim);color:var(--amber);}
 </style>
 </head>
 <body>
@@ -121,7 +123,7 @@
   </div>
 
   <div class="note-bar">
-    <b>How to read this:</b> Click a card to see full top holdings. "Value Δ Q/Q" is the change in total 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss (13F filings don't disclose entry price or realized P&amp;L, so this mixes trading activity with market moves). A <span class="flag-new" style="padding:1px 5px;">NEW</span> badge means the fund didn't hold that CUSIP last quarter; a <span class="flag-increased" style="padding:1px 5px;">+X%</span> badge means an existing position grew by 15% or more in share count. For both, we estimate a price as the <i>average daily closing price during the quarter</i> (SEC doesn't disclose exact trade dates) compared to today's price — a rough approximation, not a real cost basis. "Position history" tracks a holding's % of portfolio across stored quarters — a "—" means it wasn't in that fund's top 25 that quarter, not necessarily that they didn't hold it at all. 13F filings are due 45 days after quarter-end: Feb 14, May 15, Aug 14, Nov 14.
+    <b>How to read this:</b> Click a card to see full top holdings. "Value Δ Q/Q" is the change in total 13F portfolio value quarter-over-quarter — a blended proxy for gain/loss (13F filings don't disclose entry price or realized P&amp;L, so this mixes trading activity with market moves). A <span class="flag-new" style="padding:1px 5px;">NEW</span> badge means the fund didn't hold that CUSIP last quarter; a <span class="flag-increased" style="padding:1px 5px;">+X%</span> badge means an existing position grew by 15% or more in share count. For both, we estimate a price as the <i>average daily closing price during the quarter</i> (SEC doesn't disclose exact trade dates) compared to today's price — a rough approximation, not a real cost basis. "Position history" tracks a holding's % of portfolio across stored quarters — a "—" means it wasn't in that fund's top 25 that quarter, not necessarily that they didn't hold it at all. "Notable moves" only shows moves worth more than 1% of a fund's book (and, where priced, more than a 1% price move) to cut out noise. 13F filings are due 45 days after quarter-end: Feb 14, May 15, Aug 14, Nov 14.
   </div>
 
   <div class="fund-grid" id="fundGrid">
@@ -189,7 +191,6 @@ function buildHistoryTable(fund, history) {
     return '<div style="padding:12px;color:var(--text-faint);font-size:11.5px;font-style:italic;">Not enough history yet — run the backfill workflow, or wait for more quarters to accumulate.</div>';
   }
 
-  // Rows = the fund's current (latest) top 10 holdings, tracked by CUSIP across all stored quarters.
   const latest = history[history.length - 1];
   const topRows = (latest.top_holdings || []).slice(0, 10).filter(h => h.cusip);
 
@@ -225,10 +226,6 @@ function buildHistoryTable(fund, history) {
     </table>`;
 }
 
-// Best-effort sector classification by issuer name keywords. Not a
-// verified GICS mapping -- just enough to give a directional read on
-// where aggregate capital is concentrated. Anything unmatched falls into
-// "Other / Unclassified".
 const SECTOR_RULES = [
   { sector: "Technology", re: /APPLE|MICROSOFT|ALPHABET|GOOGLE|AMAZON\.COM CLOUD|META PLATFORMS|NVIDIA|BROADCOM|ORACLE|SALESFORCE|ADOBE|INTEL CORP|ADVANCED MICRO|QUALCOMM|CISCO|INTERNATIONAL BUSINESS MACH|PALANTIR|CROWDSTRIKE|MICRON|TEXAS INSTRUMENTS|APPLIED MATERIALS|KEYSIGHT|SANDISK/ },
   { sector: "Financials", re: /JPMORGAN|BANK OF AMER|WELLS FARGO|CITIGROUP|GOLDMAN|MORGAN STANLEY|AMERICAN EXPRESS|^VISA|MASTERCARD|CAPITAL ONE|CHUBB|BERKSHIRE HATHAWAY|S&P GLOBAL|BLACKROCK/ },
@@ -298,7 +295,7 @@ function buildDivergence(computed) {
 
     if (prior) {
       (prior.top_holdings || []).forEach(h => {
-        if (!h.cusip || currentCusips.has(h.cusip)) return; // still held, not exited
+        if (!h.cusip || currentCusips.has(h.cusip)) return;
         if (!byCusip[h.cusip]) byCusip[h.cusip] = { issuer: h.issuer, buyers: [], sellers: [] };
         byCusip[h.cusip].sellers.push(f.fund_name);
       });
@@ -353,7 +350,159 @@ function buildSectorRollup(computed) {
   }).join("");
 }
 
-function renderCrossFundDashboard(computed) {
+function passesMoveFilter(e) {
+  if ((e.pct || 0) <= 1) return false;
+  if ((e.type === "new" || e.type === "increased") && e.price && e.price.pct_change_since_avg !== null) {
+    if (Math.abs(e.price.pct_change_since_avg) <= 1) return false;
+  }
+  return true;
+}
+
+function buildMovesFeed(data) {
+  const byFund = {};
+  data.forEach(row => {
+    if (!byFund[row.cik]) byFund[row.cik] = [];
+    byFund[row.cik].push(row);
+  });
+  for (const cik in byFund) {
+    byFund[cik].sort((a, b) => a.period_end.localeCompare(b.period_end));
+  }
+
+  const events = [];
+  let globalLatestPeriod = null;
+
+  Object.values(byFund).forEach(snapshots => {
+    for (let i = 0; i < snapshots.length; i++) {
+      const snap = snapshots[i];
+      if (!globalLatestPeriod || snap.period_end > globalLatestPeriod) globalLatestPeriod = snap.period_end;
+
+      (snap.top_holdings || []).forEach(h => {
+        if (h.is_new) {
+          const e = { period: snap.period_end, fund: snap.fund_name, type: "new", issuer: h.issuer, pct: h.pct_of_portfolio, value: h.value, price: h.price_estimate };
+          if (passesMoveFilter(e)) events.push(e);
+        } else if (h.is_increased) {
+          const e = { period: snap.period_end, fund: snap.fund_name, type: "increased", issuer: h.issuer, pct: h.pct_of_portfolio, pctIncrease: h.pct_share_increase, value: h.value, price: h.price_estimate };
+          if (passesMoveFilter(e)) events.push(e);
+        }
+      });
+
+      if (i > 0) {
+        const prior = snapshots[i - 1];
+        const currentCusips = new Set((snap.top_holdings || []).map(h => h.cusip).filter(Boolean));
+        (prior.top_holdings || []).forEach(h => {
+          if (h.cusip && !currentCusips.has(h.cusip)) {
+            const e = { period: snap.period_end, fund: snap.fund_name, type: "exit", issuer: h.issuer, pct: h.pct_of_portfolio };
+            if (passesMoveFilter(e)) events.push(e);
+          }
+        });
+      }
+    }
+  });
+
+  events.sort((a, b) => b.period.localeCompare(a.period));
+  return { events, globalLatestPeriod };
+}
+
+function renderMoveEvent(e) {
+  let dotColor, label, detail;
+  let priceStr = "";
+  if (e.price && e.price.pct_change_since_avg !== null) {
+    const cls = e.price.pct_change_since_avg >= 0 ? "up" : "down";
+    const arrow = e.price.pct_change_since_avg >= 0 ? "▲" : "▼";
+    priceStr = ` · avg $${e.price.avg_price_quarter} → $${e.price.current_price} <span class="${cls}">${arrow}${Math.abs(e.price.pct_change_since_avg)}%</span>`;
+  }
+
+  if (e.type === "new") {
+    dotColor = "var(--green)";
+    label = `${e.fund} <span style="color:var(--text-faint)">bought</span> ${shortName(e.issuer)}`;
+    detail = `${e.pct}% of book · ${fmtMoney(e.value)}${priceStr}`;
+  } else if (e.type === "increased") {
+    dotColor = "var(--blue)";
+    label = `${e.fund} <span style="color:var(--text-faint)">added to</span> ${shortName(e.issuer)} <span style="color:var(--blue)">(+${e.pctIncrease}% shares)</span>`;
+    detail = `now ${e.pct}% of book${priceStr}`;
+  } else {
+    dotColor = "var(--red)";
+    label = `${e.fund} <span style="color:var(--text-faint)">fully exited</span> ${shortName(e.issuer)}`;
+    detail = `was ${e.pct}% of book`;
+  }
+
+  return `
+    <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-soft);">
+      <div style="width:8px;height:8px;border-radius:50%;background:${dotColor};margin-top:4px;flex-shrink:0;"></div>
+      <div>
+        <div style="font-size:12.5px;">${label}</div>
+        <div style="font-size:10.5px;color:var(--text-dim);margin-top:2px;">${detail}</div>
+      </div>
+    </div>`;
+}
+
+function renderMovesFeed(data) {
+  const { events, globalLatestPeriod } = buildMovesFeed(data);
+  const byType = { new: [], increased: [], exit: [] };
+  events.forEach(e => byType[e.type].push(e));
+
+  const tabMeta = {
+    new: { label: "New", color: "var(--green)" },
+    increased: { label: "Increased", color: "var(--blue)" },
+    exit: { label: "Exits", color: "var(--red)" },
+  };
+
+  const tabsHtml = `
+    <div style="display:flex;gap:6px;margin-bottom:12px;">
+      ${["new", "increased", "exit"].map(t => `
+        <button class="moves-tab${t === "new" ? " active" : ""}" data-tab="${t}" onclick="switchMovesTab('${t}')">
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${tabMeta[t].color};margin-right:5px;"></span>${tabMeta[t].label} (${byType[t].length})
+        </button>`).join("")}
+    </div>`;
+
+  const panels = ["new", "increased", "exit"].map(type => {
+    const list = byType[type];
+    const current = list.filter(e => e.period === globalLatestPeriod);
+    const older = list.filter(e => e.period !== globalLatestPeriod);
+    const olderByPeriod = {};
+    older.forEach(e => {
+      if (!olderByPeriod[e.period]) olderByPeriod[e.period] = [];
+      olderByPeriod[e.period].push(e);
+    });
+    const periods = Object.keys(olderByPeriod).sort((a, b) => b.localeCompare(a));
+
+    let html = `<div id="movesPanel-${type}" class="moves-panel" style="display:${type === "new" ? "block" : "none"};">`;
+    html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--amber-dim);margin-bottom:8px;">Current quarter (${globalLatestPeriod || "—"})</div>`;
+    html += current.length
+      ? current.map(renderMoveEvent).join("")
+      : `<div style="color:var(--text-faint);font-size:11.5px;">None this quarter (over 1% of book, and over 1% price move where priced).</div>`;
+
+    if (periods.length > 0) {
+      html += `<button onclick="toggleMovesHistory('${type}')" style="margin-top:14px;background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11px;padding:6px 10px;cursor:pointer;">Show full history (${older.length} more)</button>`;
+      html += `<div id="olderMoves-${type}" style="display:none;margin-top:12px;">`;
+      periods.forEach(period => {
+        html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin:14px 0 8px;">${period}</div>`;
+        html += olderByPeriod[period].map(renderMoveEvent).join("");
+      });
+      html += `</div>`;
+    }
+    html += `</div>`;
+    return html;
+  }).join("");
+
+  return tabsHtml + panels;
+}
+
+function switchMovesTab(type) {
+  ["new", "increased", "exit"].forEach(t => {
+    document.getElementById("movesPanel-" + t).style.display = t === type ? "block" : "none";
+  });
+  document.querySelectorAll(".moves-tab").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.tab === type);
+  });
+}
+
+function toggleMovesHistory(type) {
+  const el = document.getElementById("olderMoves-" + type);
+  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+function renderCrossFundDashboard(computed, allData) {
   const el = document.getElementById("crossFundSection");
   el.innerHTML = `
     <div class="cross-section">
@@ -368,6 +517,10 @@ function renderCrossFundDashboard(computed) {
           <h3>⚡ Crowding / Divergence (funds disagree)</h3>
           ${buildDivergence(computed)}
         </div>
+      </div>
+      <div class="cross-panel" style="margin-bottom:24px;">
+        <h3>📰 Notable Moves</h3>
+        ${renderMovesFeed(allData)}
       </div>
       <div class="cross-panel">
         <h3>📊 Sector Rollup (aggregate capital across all funds)</h3>
@@ -396,7 +549,7 @@ async function loadData() {
 
   const latestByFund = {};
   const priorByFund = {};
-  const historyByFund = {}; // cik -> array of ALL stored snapshots, ascending by period_end
+  const historyByFund = {};
   for (const row of data) {
     if (!latestByFund[row.cik]) {
       latestByFund[row.cik] = row;
@@ -418,7 +571,6 @@ async function loadData() {
     grid.innerHTML = '<div class="empty">No snapshots yet. Run the GitHub Action once (Actions tab → Refresh 13F data → Run workflow) to populate Supabase.</div>';
     tickerTrack.textContent = "No data yet.";
   } else {
-    // Precompute deltas once so the ticker and cards agree
     const computed = rows.map(f => {
       const prior = priorByFund[f.cik];
       let pct = null;
@@ -428,7 +580,6 @@ async function loadData() {
       return { f, prior, pct };
     });
 
-    // Ticker tape
     const tickItems = computed.map(({ f, pct }) => {
       if (pct === null) {
         return `<span class="tick-item"><b>${f.fund_name}</b> AUM ${fmtMoney(f.portfolio_value)} <span style="color:var(--text-faint)">first snapshot</span></span>`;
@@ -439,7 +590,6 @@ async function loadData() {
     });
     tickerTrack.innerHTML = tickItems.join("") + tickItems.join("");
 
-    // Cards
     grid.innerHTML = computed.map(({ f, prior, pct }, i) => {
       const cls = pct === null ? "" : (pct >= 0 ? "up" : "down");
       const arrow = pct === null ? "" : (pct >= 0 ? "▲" : "▼");
@@ -520,7 +670,7 @@ async function loadData() {
       </div>`;
     }).join("");
 
-    renderCrossFundDashboard(computed);
+    renderCrossFundDashboard(computed, data);
   }
 
   document.getElementById("lastUpdated").textContent = "Last loaded " + new Date().toLocaleString();
