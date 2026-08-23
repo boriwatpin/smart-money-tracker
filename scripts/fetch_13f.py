@@ -650,8 +650,9 @@ def call_gemini(prompt, _retry=True):
     mid-sentence. We also explicitly check finishReason and reject anything
     that didn't finish cleanly, rather than silently saving truncated text.
 
-    Retries once after a short pause on a transient server error (5xx) --
-    those are Google-side hiccups, not something a bigger token budget or
+    Retries once after a short pause on a transient server error (5xx) or
+    a connection-level failure (reset, timeout, DNS blip) -- those are
+    Google-side or network hiccups, not something a bigger token budget or
     a different prompt would fix.
     """
     if not GEMINI_API_KEY:
@@ -680,6 +681,15 @@ def call_gemini(prompt, _retry=True):
             print("[ai] Gemini returned an empty summary, discarding")
             return None
         return text
+    except requests.exceptions.RequestException as e:
+        # Connection resets, timeouts, DNS blips -- these happen before we
+        # ever get a status code to check, so they need their own retry path.
+        if _retry:
+            print(f"[ai] Gemini request failed ({e}), retrying once after a short pause")
+            time.sleep(5)
+            return call_gemini(prompt, _retry=False)
+        print(f"[ai] Gemini call failed after retry: {e}")
+        return None
     except Exception as e:
         print(f"[ai] Gemini call failed: {e}")
         return None
