@@ -182,7 +182,7 @@
     <div class="masthead">
       <div>
         <h1>Smart Money<span>.</span>Tracker</h1>
-        <div class="sub">13F institutional positioning — 10 hedge funds, auto-refreshed from SEC EDGAR</div>
+        <div class="sub" id="mastheadSub">13F institutional positioning — auto-refreshed from SEC EDGAR</div>
       </div>
       <div class="clock">
         <div class="label">Next 13F deadline</div>
@@ -509,10 +509,11 @@ function buildConsensusPicks(computed) {
     return '<div style="color:var(--text-faint);font-size:11.5px;">No overlapping holdings found across funds\' top 25 lists yet.</div>';
   }
 
+  const totalFundCount = computed.length;
   const rows = ranked.map(row => `
     <tr>
       <td class="tk">${shortName(row.issuer)}</td>
-      <td>${row.funds.length}/10</td>
+      <td>${row.funds.length}/${totalFundCount}</td>
       <td>${fmtMoney(row.totalValue)}</td>
       <td style="white-space:nowrap;">${buildConsensusTrendCell(row.cusip)}</td>
       <td>${row.funds.map(name => `<span class="fund-chip">${name.split(" ")[0]}</span>`).join("")}</td>
@@ -917,6 +918,12 @@ function buildSmartMoneySignals(computed) {
   };
   const order = { battleground: 0, distribution: 1, consensus: 2, building: 3, watching: 4 };
 
+  // "Broad consensus" means a majority of tracked funds, not a fixed count --
+  // this way the bar doesn't get easier to clear just because more funds
+  // get added to the tracker over time.
+  const totalFundCount = computed.length;
+  const consensusThreshold = Math.ceil(totalFundCount / 2);
+
   const allRows = Object.values(byCusip).map(row => {
     const heldCount = row.holders.size;
     const buyers = row.buyers;
@@ -928,9 +935,9 @@ function buildSmartMoneySignals(computed) {
     } else if (sellers.length > 0) {
       cat = "distribution";
       note = `${sellers.length} fund${sellers.length > 1 ? "s" : ""} trimming or exiting, no buyers`;
-    } else if (heldCount >= 5) {
+    } else if (heldCount >= consensusThreshold) {
       cat = "consensus";
-      note = `${heldCount}/10 funds hold, no sellers this quarter`;
+      note = `${heldCount}/${totalFundCount} funds hold, no sellers this quarter`;
     } else if (buyers.length > 0) {
       cat = "building";
       note = `${buyers.length} fund${buyers.length > 1 ? "s" : ""} newly buying or adding this quarter`;
@@ -1092,6 +1099,8 @@ async function loadData() {
     tickerTrack.innerHTML = tickItems.join("") + tickItems.join("");
 
     renderFundGrid();
+
+    document.getElementById("mastheadSub").textContent = `13F institutional positioning — ${computed.length} hedge funds, auto-refreshed from SEC EDGAR`;
 
     renderCrossFundDashboard(computed, data);
   }
