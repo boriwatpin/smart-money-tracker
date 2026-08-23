@@ -629,8 +629,11 @@ def refresh_cohort_prices():
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.5-flash"  # widely-used, stable, free-tier-eligible standard model --
-# check ai.google.dev/gemini-api/docs/pricing if this model is ever renamed/deprecated
+GEMINI_MODEL = "gemini-3.5-flash"  # current GA model, free tier -- gemini-2.5-*
+# models are now considered legacy/deprecated even though the pricing page
+# doesn't show a hard shutdown banner yet; new API keys may not have access
+# to the older generation, which is what caused repeated 404s here.
+# Check ai.google.dev/gemini-api/docs/pricing if this model is ever renamed/deprecated.
 
 BIG_MOVE_THRESHOLD = 15  # percentage points of change in the max cohort move
 # since the last summary, before we bother regenerating just for a price move
