@@ -40,7 +40,7 @@ FUNDS = [
     {"name": "Bridgewater Associates", "person": "Ray Dalio", "cik": "0001350694"},
     {"name": "Renaissance Technologies", "person": "Jim Simons legacy / quant", "cik": "0001037389"},
     {"name": "Citadel Advisors", "person": "Ken Griffin", "cik": "0001423053"},
-    {"name": "Pershing Square Capital Management", "person": "Bill Ackman", "cik": "0001336528"},
+    {"name": "Pershing Square Inc.", "person": "Bill Ackman", "cik": "0002026053"},
     {"name": "Tiger Global Management", "person": "Chase Coleman", "cik": "0001167483"},
     {"name": "Third Point", "person": "Dan Loeb", "cik": "0001040273"},
     {"name": "Soros Fund Management", "person": "Dawn Fitzpatrick", "cik": "0001029160"},
