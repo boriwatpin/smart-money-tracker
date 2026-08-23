@@ -382,7 +382,7 @@ def process_filing(fund, latest, figi_cache):
 
 def get_latest_snapshot_per_fund():
     """Fetch each fund's latest stored snapshot in one query."""
-    url = f"{SUPABASE_URL}/rest/v1/fund_snapshots?select=cik,fund_name,period_end,top_holdings&order=period_end.desc"
+    url = f"{SUPABASE_URL}/rest/v1/fund_snapshots?select=cik,fund_name,period_end,portfolio_value,top_holdings&order=period_end.desc"
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     r = requests.get(url, headers=headers, timeout=30)
     r.raise_for_status()
