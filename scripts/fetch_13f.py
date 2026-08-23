@@ -46,6 +46,8 @@ FUNDS = [
     {"name": "Soros Fund Management", "person": "Dawn Fitzpatrick", "cik": "0001029160"},
     {"name": "Point72 Asset Management", "person": "Steven Cohen", "cik": "0001603466"},
     {"name": "Millennium Management", "person": "Israel Englander", "cik": "0001273087"},
+    {"name": "Duquesne Family Office", "person": "Stanley Druckenmiller", "cik": "0001536411"},
+    {"name": "Appaloosa Management", "person": "David Tepper", "cik": "0001656456"},
 ]
 
 TOP_N_HOLDINGS = 25
