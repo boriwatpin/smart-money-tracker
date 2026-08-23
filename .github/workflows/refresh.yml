@@ -2,6 +2,10 @@ name: Refresh 13F data
 
 on:
   schedule:
+    # Runs daily at 13:00 UTC. Cheap to run daily since the script only
+    # writes when a fund has actually filed something new (upsert on
+    # cik + period_end). Tighten this to run more often only in the
+    # week around each 45-day deadline if you want fresher same-day data.
     - cron: "0 13 * * *"
   workflow_dispatch: {}
 
@@ -23,4 +27,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/fetch_13f.py
