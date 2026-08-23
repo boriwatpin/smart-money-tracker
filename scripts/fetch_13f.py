@@ -642,7 +642,14 @@ BIG_MOVE_THRESHOLD = 15  # percentage points of change in the max cohort move
 def call_gemini(prompt):
     """A single free-tier-eligible Gemini call. Returns None (rather than
     raising) on any failure, since a missing AI summary should never break
-    the rest of the daily pipeline."""
+    the rest of the daily pipeline.
+
+    maxOutputTokens is generous (2048) because gemini-3.5-flash spends part
+    of its token budget on internal "thinking" before writing the visible
+    answer -- a small budget can cause the model to run out of tokens
+    mid-sentence. We also explicitly check finishReason and reject anything
+    that didn't finish cleanly, rather than silently saving truncated text.
+    """
     if not GEMINI_API_KEY:
         print("[ai] GEMINI_API_KEY not set, skipping AI summary")
         return None
@@ -650,12 +657,21 @@ def call_gemini(prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 500},
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
         }
         r = requests.post(url, json=body, timeout=30)
         r.raise_for_status()
         data = r.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        candidate = data["candidates"][0]
+        finish_reason = candidate.get("finishReason")
+        if finish_reason not in (None, "STOP"):
+            print(f"[ai] Gemini response did not finish cleanly (finishReason={finish_reason}), discarding")
+            return None
+        text = candidate.get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+        if not text:
+            print("[ai] Gemini returned an empty summary, discarding")
+            return None
+        return text
     except Exception as e:
         print(f"[ai] Gemini call failed: {e}")
         return None
