@@ -279,8 +279,14 @@ def process_filing(fund, latest, figi_cache):
         print(f"[warn] infotable parsed to zero holdings for {fund['name']}")
         return
 
-    total_thousands = sum(h["value_thousands"] for h in holdings)
-    total_value = total_thousands * 1000
+    # NOTE: despite the field name "value_thousands" (kept for continuity
+    # with parse_infotable's variable naming), SEC's XML Information Table
+    # schema reports <value> in whole dollars, not thousands -- the *1000
+    # conversion that used to live here was inflating every dollar figure
+    # on the site by exactly 1000x. Percentages were unaffected since both
+    # sides of that math scaled by the same wrong factor and canceled out.
+    total_value = sum(h["value_thousands"] for h in holdings)
+    total_for_pct = total_value  # kept as a separate name for clarity below
 
     top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
 
@@ -299,10 +305,10 @@ def process_filing(fund, latest, figi_cache):
         entry = {
             "issuer": h["issuer"],
             "class": h["class"],
-            "value": h["value_thousands"] * 1000,
+            "value": h["value_thousands"],
             "shares": h["shares"],
             "cusip": h["cusip"],
-            "pct_of_portfolio": round((h["value_thousands"] / total_thousands) * 100, 2) if total_thousands else 0,
+            "pct_of_portfolio": round((h["value_thousands"] / total_for_pct) * 100, 2) if total_for_pct else 0,
         }
 
         is_new = is_new_quarter and h["cusip"] and h["cusip"] not in prior_by_cusip
