@@ -629,7 +629,7 @@ def refresh_cohort_prices():
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = "gemini-2.5-flash-lite"  # cheap, free-tier-eligible as of testing --
+GEMINI_MODEL = "gemini-2.5-flash"  # widely-used, stable, free-tier-eligible standard model --
 # check ai.google.dev/gemini-api/docs/pricing if this model is ever renamed/deprecated
 
 BIG_MOVE_THRESHOLD = 15  # percentage points of change in the max cohort move
