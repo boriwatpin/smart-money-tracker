@@ -279,14 +279,29 @@ def process_filing(fund, latest, figi_cache):
         print(f"[warn] infotable parsed to zero holdings for {fund['name']}")
         return
 
-    # NOTE: despite the field name "value_thousands" (kept for continuity
-    # with parse_infotable's variable naming), SEC's XML Information Table
-    # schema reports <value> in whole dollars, not thousands -- the *1000
-    # conversion that used to live here was inflating every dollar figure
-    # on the site by exactly 1000x. Percentages were unaffected since both
-    # sides of that math scaled by the same wrong factor and canceled out.
-    total_value = sum(h["value_thousands"] for h in holdings)
-    total_for_pct = total_value  # kept as a separate name for clarity below
+    # SEC's 13F XML <value> field is inconsistently scaled across filers --
+    # some filing agents report it in whole dollars (the modern spec's
+    # stated convention), others still use the legacy thousands convention.
+    # We verified this empirically: Berkshire/Citadel/Third Point report
+    # whole dollars, Duquesne reports thousands -- same field, different
+    # units, depending on whichever filing software was used.
+    #
+    # Auto-detect per filing rather than assuming one global convention.
+    # $50M (not $1B) is the right cutoff: SEC's legal minimum to even
+    # require a 13F filing is $100M, so nothing genuinely below that should
+    # exist under either convention -- but a $1B cutoff was too aggressive
+    # and wrongly inflated small-but-correct transitional filings (e.g. a
+    # newly-public parent's tiny initial single-holding filing, genuinely
+    # worth ~$500M) by assuming they must be in thousands.
+    raw_sum = sum(h["value_thousands"] for h in holdings)
+    if raw_sum > 50_000_000:
+        value_scale = 1
+    else:
+        value_scale = 1000
+    total_value = raw_sum * value_scale
+    total_for_pct = raw_sum  # percentages are a ratio, so the scale cancels out regardless
+    if value_scale != 1:
+        print(f"[debug] {fund['name']} ({latest['period']}): raw value sum ${raw_sum:,} looked like thousands, scaled x1000")
 
     top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
 
@@ -305,7 +320,7 @@ def process_filing(fund, latest, figi_cache):
         entry = {
             "issuer": h["issuer"],
             "class": h["class"],
-            "value": h["value_thousands"],
+            "value": h["value_thousands"] * value_scale,
             "shares": h["shares"],
             "cusip": h["cusip"],
             "pct_of_portfolio": round((h["value_thousands"] / total_for_pct) * 100, 2) if total_for_pct else 0,
