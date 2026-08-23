@@ -24,8 +24,8 @@
   .masthead h1{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:24px;margin:0;letter-spacing:-0.02em;}
   .masthead h1 span{color:var(--amber);}
   .masthead .sub{color:var(--text-dim);font-size:13px;margin-top:4px;}
-  .back-link{color:var(--text-dim);font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-decoration:none;display:inline-block;margin-top:10px;}
-  .back-link:hover{color:var(--amber);}
+  .back-link{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#F2C868,var(--amber));color:#1a1206;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:11.5px;padding:8px 16px;border-radius:3px;text-decoration:none;margin-top:12px;box-shadow:0 2px 10px rgba(232,180,76,0.35);transition:transform .12s ease,box-shadow .12s ease;}
+  .back-link:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(232,180,76,0.5);color:#1a1206;}
 
   .disclaimer{background:var(--panel);border:1px solid var(--red-dim);border-left:3px solid var(--red);padding:14px 16px;font-size:12.5px;color:var(--text-dim);margin-bottom:26px;line-height:1.6;}
   .disclaimer b{color:var(--text);}
@@ -51,7 +51,7 @@
   <div class="masthead">
     <h1>Research Candidates<span>.</span></h1>
     <div class="sub">Screening tool built from the same 10-fund 13F dataset — surfaces mechanical patterns, does not tell you what to buy.</div>
-    <a class="back-link" href="index.html">← Back to main dashboard</a>
+    <a class="back-link" href="index.html">← Main dashboard</a>
   </div>
 
   <div class="disclaimer">
@@ -59,6 +59,12 @@
   </div>
 
   <div class="status-row" id="statusRow">Loading data…</div>
+
+  <div class="panel">
+    <h2>🔒 Locked Cohort Performance</h2>
+    <div class="method">Once a quarter's filings are complete across all 10 funds, this locks in the top NEW positions (combined by CUSIP where multiple funds independently bought the same stock) and tracks their price from that lock date forward — a real, dollar-based track record, not just a point-in-time screen like the lists below.</div>
+    <div id="lockedCohortPanel" class="empty">Coming soon — backend cohort-locking logic not yet built.</div>
+  </div>
 
   <div class="panel">
     <h2>📈 Broadening Consensus</h2>
@@ -209,6 +215,61 @@ function buildConfirmedConsensus(latestByCik) {
   return `<table><tr><th>Issuer</th><th># Funds</th><th>Best price move</th><th>Held by</th></tr>${body}</table>`;
 }
 
+function buildLockedCohort(rows) {
+  if (!rows || rows.length === 0) {
+    return '<div class="empty">No cohort locked yet — waiting for all 10 funds to align on the same latest quarter.</div>';
+  }
+
+  const byPeriod = {};
+  rows.forEach(r => {
+    if (!byPeriod[r.period_end]) byPeriod[r.period_end] = [];
+    byPeriod[r.period_end].push(r);
+  });
+  const periods = Object.keys(byPeriod).sort().reverse();
+
+  return periods.map(period => {
+    const group = byPeriod[period];
+    const lockedDate = group[0].locked_date;
+    const avgPerf = group.reduce((s, r) => s + ((r.current_price - r.day0_price) / r.day0_price) * 100, 0) / group.length;
+    const avgCls = avgPerf >= 0 ? "up" : "down";
+    const avgArrow = avgPerf >= 0 ? "▲" : "▼";
+
+    const body = group.map(r => {
+      const pct = ((r.current_price - r.day0_price) / r.day0_price) * 100;
+      const cls = pct >= 0 ? "up" : "down";
+      const arrow = pct >= 0 ? "▲" : "▼";
+      let refCell = "—";
+      if (r.avg_price_quarter) {
+        const refPct = ((r.current_price - r.avg_price_quarter) / r.avg_price_quarter) * 100;
+        const refCls = refPct >= 0 ? "up" : "down";
+        const refArrow = refPct >= 0 ? "▲" : "▼";
+        refCell = `<span style="color:var(--text-faint);font-size:10.5px;">$${r.avg_price_quarter} → $${r.current_price}<br><span class="${refCls}">${refArrow} ${Math.abs(refPct).toFixed(1)}%</span></span>`;
+      }
+      return `
+        <tr>
+          <td class="tk">${shortName(r.issuer)}</td>
+          <td>${(r.funds || []).map(n => `<span class="fund-chip">${n.split(" ")[0]}</span>`).join("")}</td>
+          <td>${fmtMoney(r.combined_value)}</td>
+          <td style="text-align:right;">
+            <div style="font-weight:600;color:var(--text);">$${r.day0_price} → $${r.current_price}</div>
+            <div class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}%</div>
+          </td>
+          <td style="text-align:right;">${refCell}</td>
+        </tr>`;
+    }).join("");
+
+    return `
+      <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">
+        ${period} cohort — locked ${lockedDate} · avg since lock:
+        <span class="${avgCls}">${avgArrow} ${Math.abs(avgPerf).toFixed(1)}%</span>
+      </div>
+      <table>
+        <tr><th>Issuer</th><th>Fund(s)</th><th>Value at filing</th><th style="text-align:right;">Since day-0 lock</th><th style="text-align:right;">Since est. quarter avg (ref)</th></tr>
+        ${body}
+      </table>`;
+  }).join('<hr style="border-color:var(--border-soft);border-top:none;margin:20px 0;">');
+}
+
 async function loadData() {
   const status = document.getElementById("statusRow");
   status.textContent = "Loading data…";
@@ -237,6 +298,18 @@ async function loadData() {
   document.getElementById("listBroadening").innerHTML = buildBroadeningConsensus(historyByFund, latestByCik);
   document.getElementById("listFresh").innerHTML = buildFreshConviction(latestByCik);
   document.getElementById("listConfirmed").innerHTML = buildConfirmedConsensus(latestByCik);
+
+  const { data: cohortData, error: cohortError } = await supabaseClient
+    .from("locked_cohorts")
+    .select("*")
+    .order("combined_value", { ascending: false });
+
+  const cohortEl = document.getElementById("lockedCohortPanel");
+  if (cohortError) {
+    cohortEl.innerHTML = `<div class="empty">Error loading cohort data: ${cohortError.message}</div>`;
+  } else {
+    cohortEl.innerHTML = buildLockedCohort(cohortData);
+  }
 
   status.textContent = "Last loaded " + new Date().toLocaleString();
 }
