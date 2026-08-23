@@ -172,7 +172,7 @@ function buildFreshConviction(latestByCik) {
   if (items.length === 0) return '<div class="empty">No qualifying positions this quarter.</div>';
 
   items.sort((a, b) => b.value - a.value);
-  const body = items.slice(0, 10).map(i => `
+  const body = items.slice(0, 20).map(i => `
     <tr>
       <td class="tk">${shortName(i.issuer)}</td>
       <td>${i.fund.split(" ")[0]}</td>
