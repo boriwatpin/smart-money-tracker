@@ -298,7 +298,7 @@ async function loadData() {
   const status = document.getElementById("statusRow");
   status.textContent = "Loading data…";
 
-  const { data, error } = await supabaseClient
+  const { data: rawData, error } = await supabaseClient
     .from("fund_snapshots")
     .select("*")
     .order("period_end", { ascending: false });
@@ -307,6 +307,15 @@ async function loadData() {
     status.textContent = "Error loading data: " + error.message;
     return;
   }
+
+  // Keep this list in sync with FUNDS in scripts/fetch_13f.py and with the
+  // matching list in index.html. See index.html for why this filter exists.
+  const ACTIVE_FUND_CIKS = new Set([
+    "0001067983", "0001350694", "0001037389", "0001423053", "0002026053",
+    "0001167483", "0001040273", "0001029160", "0001603466", "0001273087",
+    "0001536411", "0001656456",
+  ]);
+  const data = rawData.filter(row => ACTIVE_FUND_CIKS.has(row.cik));
 
   const historyByFund = {};
   const latestByCik = {};
