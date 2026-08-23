@@ -399,6 +399,14 @@ def get_all_locked_cohort_rows():
     return r.json()
 
 
+def get_cohort_rows_for_period(period_end):
+    url = f"{SUPABASE_URL}/rest/v1/locked_cohorts?period_end=eq.{period_end}&select=*"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def fetch_current_price(ticker):
     """Simple last-close lookup, used for locking day-0 price and for the
     daily refresh of tracked cohort stocks."""
@@ -413,29 +421,15 @@ def fetch_current_price(ticker):
         return None
 
 
-def check_and_lock_cohort():
-    """Once all 10 funds report the same latest quarter, lock in the top 10
-    NEW positions (combined by CUSIP where multiple funds independently
-    bought the same stock) as a fixed cohort tracked forward from today's
-    price. Only ever locks once per quarter -- if a cohort already exists
-    for a period, this does nothing.
-    """
-    latest_by_fund = get_latest_snapshot_per_fund()
-    if len(latest_by_fund) < len(FUNDS):
-        print(f"[cohort] only {len(latest_by_fund)}/{len(FUNDS)} funds have any data yet, skipping")
-        return
+COHORT_LOCK_THRESHOLD = 9  # fixed count -- deliberately NOT proportional to
+# len(FUNDS), so the bar stays exactly this strict even as more funds are
+# added later, rather than getting looser as the fund count grows.
 
-    periods = set(row["period_end"] for row in latest_by_fund.values())
-    if len(periods) > 1:
-        print(f"[cohort] funds not yet aligned on the same latest quarter ({sorted(periods)}), skipping lock check")
-        return
 
-    period = periods.pop()
-    if cohort_exists(period):
-        return  # already locked, nothing to do
-
+def gather_new_positions_by_cusip(rows):
+    """Combine NEW positions by CUSIP across a set of fund snapshot rows."""
     by_cusip = {}
-    for row in latest_by_fund.values():
+    for row in rows:
         for h in (row.get("top_holdings") or []):
             if not h.get("is_new") or not h.get("cusip"):
                 continue
@@ -456,37 +450,120 @@ def check_and_lock_cohort():
                 }
             by_cusip[cusip]["funds"].append(row["fund_name"])
             by_cusip[cusip]["combined_value"] += h.get("value", 0)
+    return by_cusip
 
-    if not by_cusip:
-        print(f"[cohort] no qualifying NEW positions with resolved tickers for {period}")
+
+def check_and_lock_cohort():
+    """Lock in the top NEW positions (combined by CUSIP where multiple funds
+    independently bought the same stock) as a fixed cohort tracked forward
+    from today's price, once at least COHORT_LOCK_THRESHOLD funds agree on
+    the same latest quarter.
+
+    If a cohort for that period already exists, this instead runs a
+    "late-arrival top-up": any fund that has since caught up to that period
+    gets merged into matching existing rows (updating funds/combined value,
+    but never touching the original lock date/price -- that stays fixed as
+    the honest historical record). Any stock a late fund uniquely qualifies
+    for top-10-equivalent status on gets added as a brand new row, locked
+    as of today -- not backdated to the original lock date, since today is
+    genuinely when it became knowable.
+    """
+    latest_by_fund = get_latest_snapshot_per_fund()
+    if not latest_by_fund:
         return
 
-    top10 = sorted(by_cusip.items(), key=lambda kv: kv[1]["combined_value"], reverse=True)[:10]
+    period_counts = {}
+    for row in latest_by_fund.values():
+        period_counts[row["period_end"]] = period_counts.get(row["period_end"], 0) + 1
+    target_period, count = max(period_counts.items(), key=lambda kv: kv[1])
 
+    if count < COHORT_LOCK_THRESHOLD:
+        print(f"[cohort] only {count} funds aligned on {target_period} (need {COHORT_LOCK_THRESHOLD}), skipping")
+        return
+
+    contributing_rows = [row for row in latest_by_fund.values() if row["period_end"] == target_period]
+    by_cusip = gather_new_positions_by_cusip(contributing_rows)
+
+    if not cohort_exists(target_period):
+        if not by_cusip:
+            print(f"[cohort] no qualifying NEW positions with resolved tickers for {target_period}")
+            return
+        top10 = sorted(by_cusip.items(), key=lambda kv: kv[1]["combined_value"], reverse=True)[:10]
+        today = date.today().isoformat()
+        locked_count = 0
+        for cusip, info in top10:
+            day0_price = fetch_current_price(info["ticker"])
+            if day0_price is None:
+                print(f"[cohort] could not get a lock price for {info['ticker']}, skipping")
+                continue
+            upsert_locked_cohort_row({
+                "period_end": target_period,
+                "cusip": cusip,
+                "issuer": info["issuer"],
+                "ticker": info["ticker"],
+                "funds": info["funds"],
+                "combined_value": info["combined_value"],
+                "avg_price_quarter": info["avg_price_quarter"],
+                "locked_date": today,
+                "day0_price": day0_price,
+                "current_price": day0_price,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            locked_count += 1
+            time.sleep(0.5)
+        total_known = len(latest_by_fund)
+        print(f"[cohort] locked {locked_count} stocks for the {target_period} cohort ({count}/{total_known} funds reporting)")
+        return
+
+    # Cohort already exists for this period -- check for late-arrival top-up.
+    existing_rows = get_cohort_rows_for_period(target_period)
+    existing_by_cusip = {r["cusip"]: r for r in existing_rows}
+    min_locked_value = min((r["combined_value"] for r in existing_rows), default=0)
     today = date.today().isoformat()
-    locked_count = 0
-    for cusip, info in top10:
-        day0_price = fetch_current_price(info["ticker"])
-        if day0_price is None:
-            print(f"[cohort] could not get a lock price for {info['ticker']}, skipping")
-            continue
-        upsert_locked_cohort_row({
-            "period_end": period,
-            "cusip": cusip,
-            "issuer": info["issuer"],
-            "ticker": info["ticker"],
-            "funds": info["funds"],
-            "combined_value": info["combined_value"],
-            "avg_price_quarter": info["avg_price_quarter"],
-            "locked_date": today,
-            "day0_price": day0_price,
-            "current_price": day0_price,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        })
-        locked_count += 1
-        time.sleep(0.5)
+    updated = 0
+    added = 0
 
-    print(f"[cohort] locked {locked_count} stocks for the {period} cohort")
+    for cusip, info in by_cusip.items():
+        if cusip in existing_by_cusip:
+            row = existing_by_cusip[cusip]
+            merged_funds = sorted(set(row["funds"]) | set(info["funds"]))
+            if merged_funds != sorted(row["funds"]) or info["combined_value"] != row["combined_value"]:
+                upsert_locked_cohort_row({
+                    "period_end": row["period_end"],
+                    "cusip": row["cusip"],
+                    "issuer": row["issuer"],
+                    "ticker": row["ticker"],
+                    "funds": merged_funds,
+                    "combined_value": info["combined_value"],
+                    "avg_price_quarter": row["avg_price_quarter"],
+                    "locked_date": row["locked_date"],
+                    "day0_price": row["day0_price"],
+                    "current_price": row["current_price"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                updated += 1
+        elif info["combined_value"] > min_locked_value:
+            day0_price = fetch_current_price(info["ticker"])
+            if day0_price is None:
+                continue
+            upsert_locked_cohort_row({
+                "period_end": target_period,
+                "cusip": cusip,
+                "issuer": info["issuer"],
+                "ticker": info["ticker"],
+                "funds": info["funds"],
+                "combined_value": info["combined_value"],
+                "avg_price_quarter": info["avg_price_quarter"],
+                "locked_date": today,
+                "day0_price": day0_price,
+                "current_price": day0_price,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+            added += 1
+            time.sleep(0.5)
+
+    if updated or added:
+        print(f"[cohort] top-up for {target_period}: updated {updated} existing rows, added {added} late-qualifying rows (locked today, not backdated)")
 
 
 def refresh_cohort_prices():
