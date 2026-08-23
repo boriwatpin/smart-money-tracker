@@ -231,7 +231,14 @@
 
     <div class="cross-panel" id="section-signals" style="margin-bottom:22px;margin-top:24px;">
       <h3>🎯 Smart Money Signals</h3>
-      <div class="panel-note">Describes what funds already did last quarter — not a prediction, not investment advice. Only shows stocks with some cross-fund signal (2+ holders, or active buying/selling).</div>
+      <div class="panel-note">Describes what funds already did last quarter — not a prediction, not investment advice. Only shows stocks with some cross-fund signal (2+ holders, or active buying/selling).<br><br>
+        <b>Criteria (checked in this order):</b><br>
+        <span style="color:var(--amber);">BATTLEGROUND</span> — funds are both buying and exiting this quarter, and neither side has 75%+ of the activity (a genuine split).<br>
+        <span style="color:var(--red);">DISTRIBUTION</span> — funds are exiting with no buyers, or exiting represents 75%+ of a mixed quarter's activity.<br>
+        <span style="color:var(--green);">BROAD CONSENSUS</span> — held by a majority of tracked funds with no meaningful selling (or buying represents 75%+ of a mixed quarter's activity and the majority threshold is met).<br>
+        <span style="color:var(--blue);">BUILDING</span> — one or more funds newly buying or adding, not yet at majority.<br>
+        <span style="color:var(--text-faint);">WATCHING</span> — held steadily by 2+ funds, no notable activity this quarter.
+      </div>
       <div id="smartSignalsSection"></div>
     </div>
 
@@ -929,9 +936,25 @@ function buildSmartMoneySignals(computed) {
     const buyers = row.buyers;
     const sellers = row.sellers;
     let cat, note;
+
     if (buyers.length > 0 && sellers.length > 0) {
-      cat = "battleground";
-      note = `${buyers.length} buying, ${sellers.length} exiting`;
+      // Only a genuine split counts as Battleground -- if one side has
+      // 75%+ of this quarter's activity, that's overwhelming agreement
+      // with minor dissent, not a real conflict.
+      const totalActivity = buyers.length + sellers.length;
+      const buyShare = buyers.length / totalActivity;
+      const sellShare = sellers.length / totalActivity;
+
+      if (buyShare >= 0.75) {
+        cat = heldCount >= consensusThreshold ? "consensus" : "building";
+        note = `${buyers.length} buying vs ${sellers.length} exiting — mostly one-directional, not a real split`;
+      } else if (sellShare >= 0.75) {
+        cat = "distribution";
+        note = `${sellers.length} exiting vs ${buyers.length} buying — mostly one-directional, not a real split`;
+      } else {
+        cat = "battleground";
+        note = `${buyers.length} buying, ${sellers.length} exiting — genuinely split`;
+      }
     } else if (sellers.length > 0) {
       cat = "distribution";
       note = `${sellers.length} fund${sellers.length > 1 ? "s" : ""} trimming or exiting, no buyers`;
@@ -1099,7 +1122,13 @@ async function loadData() {
     const computed = rows.map(f => {
       const prior = priorByFund[f.cik];
       let pct = null;
-      if (prior && prior.portfolio_value) {
+      // A prior snapshot with only a couple of holdings is almost certainly
+      // a transitional/stub filing (e.g. an entity-change event like
+      // Pershing Square's post-IPO consolidation), not a real comparable
+      // baseline -- dividing by an artificially tiny prior value produces a
+      // mathematically correct but practically meaningless percentage
+      // (e.g. "+3319%"). Treat it the same as having no prior at all.
+      if (prior && prior.portfolio_value && (prior.num_holdings || 0) >= 3) {
         pct = ((f.portfolio_value - prior.portfolio_value) / prior.portfolio_value) * 100;
       }
       return { f, prior, pct };
@@ -1110,9 +1139,10 @@ async function loadData() {
 
     document.getElementById("smartSignalsSection").innerHTML = buildSmartMoneySignals(computed);
 
-    const tickItems = computed.map(({ f, pct }) => {
+    const tickItems = computed.map(({ f, prior, pct }) => {
       if (pct === null) {
-        return `<span class="tick-item"><b>${f.fund_name}</b> AUM ${fmtMoney(f.portfolio_value)} <span style="color:var(--text-faint)">first snapshot</span></span>`;
+        const label = prior ? "prior N/A" : "first snapshot";
+        return `<span class="tick-item"><b>${f.fund_name}</b> AUM ${fmtMoney(f.portfolio_value)} <span style="color:var(--text-faint)">${label}</span></span>`;
       }
       const cls = pct >= 0 ? "tick-up" : "tick-down";
       const arrow = pct >= 0 ? "▲" : "▼";
@@ -1169,7 +1199,7 @@ function renderFundGrid() {
     const cls = pct === null ? "" : (pct >= 0 ? "up" : "down");
     const arrow = pct === null ? "" : (pct >= 0 ? "▲" : "▼");
     const deltaHtml = pct === null
-      ? '<span style="color:var(--text-faint)">first snapshot on file</span>'
+      ? `<span style="color:var(--text-faint)">${prior ? "prior quarter not comparable (too few holdings)" : "first snapshot on file"}</span>`
       : `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}% vs ${prior.period_end}</span>`;
 
     const topFive = (f.top_holdings || []).slice(0, 5);
