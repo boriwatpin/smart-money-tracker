@@ -357,6 +357,167 @@ def process_filing(fund, latest, figi_cache):
     print(f"[ok] {fund['name']}: period {latest['period']} value ${total_value:,.0f} ({len(holdings)} holdings, {new_count} new, {increased_count} increased, {priced_count} priced)")
 
 
+def get_latest_snapshot_per_fund():
+    """Fetch each fund's latest stored snapshot in one query."""
+    url = f"{SUPABASE_URL}/rest/v1/fund_snapshots?select=cik,fund_name,period_end,top_holdings&order=period_end.desc"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    latest = {}
+    for row in r.json():
+        if row["cik"] not in latest:
+            latest[row["cik"]] = row
+    return latest
+
+
+def cohort_exists(period_end):
+    url = f"{SUPABASE_URL}/rest/v1/locked_cohorts?period_end=eq.{period_end}&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    return len(r.json()) > 0
+
+
+def upsert_locked_cohort_row(row):
+    url = f"{SUPABASE_URL}/rest/v1/locked_cohorts?on_conflict=period_end,cusip"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+    }
+    r = requests.post(url, headers=headers, data=json.dumps([row]), timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Supabase upsert failed for locked_cohorts: {r.status_code} {r.text}")
+
+
+def get_all_locked_cohort_rows():
+    url = f"{SUPABASE_URL}/rest/v1/locked_cohorts?select=*"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def fetch_current_price(ticker):
+    """Simple last-close lookup, used for locking day-0 price and for the
+    daily refresh of tracked cohort stocks."""
+    try:
+        yahoo_ticker = normalize_ticker_for_yahoo(ticker)
+        hist = yf.Ticker(yahoo_ticker).history(period="5d", auto_adjust=True)
+        if hist.empty:
+            return None
+        return round(float(hist["Close"].iloc[-1]), 2)
+    except Exception as e:
+        print(f"[debug] fetch_current_price exception for {ticker}: {e}")
+        return None
+
+
+def check_and_lock_cohort():
+    """Once all 10 funds report the same latest quarter, lock in the top 10
+    NEW positions (combined by CUSIP where multiple funds independently
+    bought the same stock) as a fixed cohort tracked forward from today's
+    price. Only ever locks once per quarter -- if a cohort already exists
+    for a period, this does nothing.
+    """
+    latest_by_fund = get_latest_snapshot_per_fund()
+    if len(latest_by_fund) < len(FUNDS):
+        print(f"[cohort] only {len(latest_by_fund)}/{len(FUNDS)} funds have any data yet, skipping")
+        return
+
+    periods = set(row["period_end"] for row in latest_by_fund.values())
+    if len(periods) > 1:
+        print(f"[cohort] funds not yet aligned on the same latest quarter ({sorted(periods)}), skipping lock check")
+        return
+
+    period = periods.pop()
+    if cohort_exists(period):
+        return  # already locked, nothing to do
+
+    by_cusip = {}
+    for row in latest_by_fund.values():
+        for h in (row.get("top_holdings") or []):
+            if not h.get("is_new") or not h.get("cusip"):
+                continue
+            price_est = h.get("price_estimate")
+            if not price_est or not price_est.get("ticker"):
+                continue
+            ticker = price_est["ticker"]
+            if not re.fullmatch(r"[A-Za-z.\-]{1,6}", ticker):
+                continue  # skip bond-like non-equity tickers
+            cusip = h["cusip"]
+            if cusip not in by_cusip:
+                by_cusip[cusip] = {
+                    "issuer": h["issuer"],
+                    "ticker": ticker,
+                    "funds": [],
+                    "combined_value": 0,
+                    "avg_price_quarter": price_est.get("avg_price_quarter"),
+                }
+            by_cusip[cusip]["funds"].append(row["fund_name"])
+            by_cusip[cusip]["combined_value"] += h.get("value", 0)
+
+    if not by_cusip:
+        print(f"[cohort] no qualifying NEW positions with resolved tickers for {period}")
+        return
+
+    top10 = sorted(by_cusip.items(), key=lambda kv: kv[1]["combined_value"], reverse=True)[:10]
+
+    today = date.today().isoformat()
+    locked_count = 0
+    for cusip, info in top10:
+        day0_price = fetch_current_price(info["ticker"])
+        if day0_price is None:
+            print(f"[cohort] could not get a lock price for {info['ticker']}, skipping")
+            continue
+        upsert_locked_cohort_row({
+            "period_end": period,
+            "cusip": cusip,
+            "issuer": info["issuer"],
+            "ticker": info["ticker"],
+            "funds": info["funds"],
+            "combined_value": info["combined_value"],
+            "avg_price_quarter": info["avg_price_quarter"],
+            "locked_date": today,
+            "day0_price": day0_price,
+            "current_price": day0_price,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        locked_count += 1
+        time.sleep(0.5)
+
+    print(f"[cohort] locked {locked_count} stocks for the {period} cohort")
+
+
+def refresh_cohort_prices():
+    """Every day, regardless of quarter, refresh current_price for every
+    already-locked cohort stock across all quarters tracked so far."""
+    rows = get_all_locked_cohort_rows()
+    if not rows:
+        return
+    refreshed = 0
+    for row in rows:
+        new_price = fetch_current_price(row["ticker"])
+        if new_price is None:
+            continue
+        upsert_locked_cohort_row({
+            "period_end": row["period_end"],
+            "cusip": row["cusip"],
+            "issuer": row["issuer"],
+            "ticker": row["ticker"],
+            "funds": row["funds"],
+            "combined_value": row["combined_value"],
+            "avg_price_quarter": row["avg_price_quarter"],
+            "locked_date": row["locked_date"],
+            "day0_price": row["day0_price"],
+            "current_price": new_price,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        refreshed += 1
+        time.sleep(0.5)
+    print(f"[cohort] refreshed prices for {refreshed}/{len(rows)} tracked cohort stocks")
+
+
 def main():
     figi_cache = {}
 
@@ -374,6 +535,16 @@ def main():
                 time.sleep(0.3)  # be polite to SEC's rate limits
         except Exception as e:
             print(f"[error] {fund['name']}: {e}")
+
+    try:
+        check_and_lock_cohort()
+    except Exception as e:
+        print(f"[error] cohort lock check failed: {e}")
+
+    try:
+        refresh_cohort_prices()
+    except Exception as e:
+        print(f"[error] cohort price refresh failed: {e}")
 
 
 if __name__ == "__main__":
