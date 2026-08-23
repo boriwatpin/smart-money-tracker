@@ -1039,7 +1039,7 @@ async function loadData() {
     return;
   }
 
-  const { data, error } = await supabaseClient
+  const { data: rawData, error } = await supabaseClient
     .from("fund_snapshots")
     .select("*")
     .order("period_end", { ascending: false });
@@ -1048,6 +1048,28 @@ async function loadData() {
     document.getElementById("lastUpdated").textContent = "Error loading data: " + error.message;
     return;
   }
+
+  // Keep this list in sync with FUNDS in scripts/fetch_13f.py. When a
+  // fund's filing entity changes (e.g. an IPO/reorg moves the 13F to a new
+  // CIK, as happened with Pershing Square in 2026), the OLD CIK's historical
+  // rows stay in Supabase forever -- correctly, since we never delete data.
+  // Without this filter, that retired CIK would show up as its own
+  // permanently-stale "zombie" fund card and never stop looking lagged.
+  const ACTIVE_FUND_CIKS = new Set([
+    "0001067983", // Berkshire Hathaway
+    "0001350694", // Bridgewater Associates
+    "0001037389", // Renaissance Technologies
+    "0001423053", // Citadel Advisors
+    "0002026053", // Pershing Square Inc. (post-IPO, was 0001336528)
+    "0001167483", // Tiger Global Management
+    "0001040273", // Third Point
+    "0001029160", // Soros Fund Management
+    "0001603466", // Point72 Asset Management
+    "0001273087", // Millennium Management
+    "0001536411", // Duquesne Family Office
+    "0001656456", // Appaloosa Management
+  ]);
+  const data = rawData.filter(row => ACTIVE_FUND_CIKS.has(row.cik));
 
   const latestByFund = {};
   const priorByFund = {};
