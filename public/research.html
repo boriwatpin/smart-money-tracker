@@ -206,10 +206,11 @@ function buildConfirmedConsensus(latestByCik) {
 
   if (rows.length === 0) return '<div class="empty">No qualifying stocks this quarter.</div>';
 
+  const totalFundCount = Object.keys(latestByCik).length;
   const body = rows.map(r => `
     <tr>
       <td class="tk">${shortName(r.issuer)}</td>
-      <td>${r.funds.length}/10</td>
+      <td>${r.funds.length}/${totalFundCount}</td>
       <td><span class="up">+${r.bestChange}%</span></td>
       <td>${r.funds.map(n => `<span class="fund-chip">${n.split(" ")[0]}</span>`).join("")}</td>
     </tr>`).join("");
