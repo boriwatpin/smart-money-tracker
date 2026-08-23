@@ -490,10 +490,15 @@ def check_and_lock_cohort():
     for top-10-equivalent status on gets added as a brand new row, locked
     as of today -- not backdated to the original lock date, since today is
     genuinely when it became knowable.
+
+    Returns a status dict so callers (e.g. the AI summary trigger) can tell
+    what actually happened this run: {"locked_new": period_or_None, "topped_up": bool}.
     """
+    status = {"locked_new": None, "topped_up": False}
+
     latest_by_fund = get_latest_snapshot_per_fund()
     if not latest_by_fund:
-        return
+        return status
 
     period_counts = {}
     for row in latest_by_fund.values():
@@ -502,7 +507,7 @@ def check_and_lock_cohort():
 
     if count < COHORT_LOCK_THRESHOLD:
         print(f"[cohort] only {count} funds aligned on {target_period} (need {COHORT_LOCK_THRESHOLD}), skipping")
-        return
+        return status
 
     contributing_rows = [row for row in latest_by_fund.values() if row["period_end"] == target_period]
     by_cusip = gather_new_positions_by_cusip(contributing_rows)
@@ -510,7 +515,7 @@ def check_and_lock_cohort():
     if not cohort_exists(target_period):
         if not by_cusip:
             print(f"[cohort] no qualifying NEW positions with resolved tickers for {target_period}")
-            return
+            return status
         top10 = sorted(by_cusip.items(), key=lambda kv: kv[1]["combined_value"], reverse=True)[:10]
         today = date.today().isoformat()
         locked_count = 0
@@ -536,7 +541,9 @@ def check_and_lock_cohort():
             time.sleep(0.5)
         total_known = len(latest_by_fund)
         print(f"[cohort] locked {locked_count} stocks for the {target_period} cohort ({count}/{total_known} funds reporting)")
-        return
+        if locked_count > 0:
+            status["locked_new"] = target_period
+        return status
 
     # Cohort already exists for this period -- check for late-arrival top-up.
     existing_rows = get_cohort_rows_for_period(target_period)
@@ -587,6 +594,9 @@ def check_and_lock_cohort():
 
     if updated or added:
         print(f"[cohort] top-up for {target_period}: updated {updated} existing rows, added {added} late-qualifying rows (locked today, not backdated)")
+        status["topped_up"] = True
+
+    return status
 
 
 def refresh_cohort_prices():
@@ -618,6 +628,191 @@ def refresh_cohort_prices():
     print(f"[cohort] refreshed prices for {refreshed}/{len(rows)} tracked cohort stocks")
 
 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = "gemini-2.5-flash-lite"  # cheap, free-tier-eligible as of testing --
+# check ai.google.dev/gemini-api/docs/pricing if this model is ever renamed/deprecated
+
+BIG_MOVE_THRESHOLD = 15  # percentage points of change in the max cohort move
+# since the last summary, before we bother regenerating just for a price move
+
+
+def call_gemini(prompt):
+    """A single free-tier-eligible Gemini call. Returns None (rather than
+    raising) on any failure, since a missing AI summary should never break
+    the rest of the daily pipeline."""
+    if not GEMINI_API_KEY:
+        print("[ai] GEMINI_API_KEY not set, skipping AI summary")
+        return None
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 500},
+        }
+        r = requests.post(url, json=body, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception as e:
+        print(f"[ai] Gemini call failed: {e}")
+        return None
+
+
+def get_last_summary(subject):
+    url = f"{SUPABASE_URL}/rest/v1/ai_summaries?subject=eq.{subject}&order=generated_at.desc&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    rows = r.json()
+    return rows[0] if rows else None
+
+
+def save_ai_summary(subject, summary_text, trigger_reason, max_move):
+    url = f"{SUPABASE_URL}/rest/v1/ai_summaries"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    row = {
+        "subject": subject,
+        "summary_text": summary_text,
+        "trigger_reason": trigger_reason,
+        "max_move_at_generation": max_move,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    r = requests.post(url, headers=headers, data=json.dumps([row]), timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Supabase insert failed for ai_summaries: {r.status_code} {r.text}")
+
+
+def get_max_cohort_move():
+    rows = get_all_locked_cohort_rows()
+    moves = [
+        abs((r["current_price"] - r["day0_price"]) / r["day0_price"] * 100)
+        for r in rows if r.get("day0_price")
+    ]
+    return max(moves) if moves else 0.0
+
+
+DASHBOARD_PROMPT = """You are summarizing institutional 13F stock-holding disclosures for a public dashboard. Below is a data digest of this quarter's portfolio changes across several hedge funds. Write a short, factual summary (4-6 sentences, plain prose, no bullet points, no markdown) that:
+- Describes what funds did (bought, added to, or exited positions) using the specific fund names and figures given
+- Points out any notable cross-fund patterns, e.g. multiple funds acting on the same stock in the same direction, or in opposite directions
+- Never recommends any action, never says "consider buying/selling", never predicts future price performance
+- Stays strictly within the data provided -- do not invent any figures, holdings, or funds not listed below
+- Ends with a brief plain-language reminder that this reflects historical, lagged disclosures, not investment advice
+
+DATA DIGEST:
+{digest}
+"""
+
+RESEARCH_PROMPT = """You are summarizing a hedge-fund research tracking page for a public dashboard. Below is a digest of a "locked cohort" of stocks tracked since they were first flagged as new institutional buys, along with their price performance since tracking began, plus any newly-emerging multi-fund consensus picks. Write a short, factual summary (4-6 sentences, plain prose, no bullet points, no markdown) that:
+- Describes how the tracked cohort has performed using the specific tickers and percentages given
+- Highlights standout movers (best and/or worst performers) factually, by name and number
+- Notes any new multi-fund consensus patterns from the digest
+- Never recommends any action, never says "consider buying/selling", never predicts future price performance
+- Stays strictly within the data provided -- do not invent any figures or tickers not listed below
+- Ends with a brief plain-language reminder that this reflects historical tracking, not investment advice
+
+DATA DIGEST:
+{digest}
+"""
+
+
+def build_dashboard_digest(latest_by_fund):
+    """Raw per-fund NEW/INCREASED/EXIT summary -- deliberately left fairly
+    raw (not pre-categorized) so the AI does its own cross-fund pattern
+    spotting rather than just restating a category we already computed."""
+    lines = []
+    for row in latest_by_fund.values():
+        holdings = row.get("top_holdings") or []
+        new = [h for h in holdings if h.get("is_new")][:5]
+        increased = [h for h in holdings if h.get("is_increased")][:5]
+        lines.append(f"\n{row['fund_name']} (AUM ${row['portfolio_value']:,.0f}, period {row['period_end']}):")
+        if new:
+            lines.append("  NEW: " + "; ".join(f"{h['issuer']} ({h['pct_of_portfolio']}% of book)" for h in new))
+        if increased:
+            lines.append("  INCREASED: " + "; ".join(f"{h['issuer']} (+{h.get('pct_share_increase', '?')}% shares)" for h in increased))
+        if not new and not increased:
+            lines.append("  No new or increased positions this quarter.")
+    return "\n".join(lines)
+
+
+def build_research_digest():
+    """Locked cohort performance plus a lightweight from-scratch consensus
+    scan (funds independently buying the same stock this quarter)."""
+    cohort_rows = get_all_locked_cohort_rows()
+    lines = ["LOCKED COHORT PERFORMANCE:"]
+    for r in sorted(cohort_rows, key=lambda x: -abs((x["current_price"] - x["day0_price"]) / x["day0_price"])) if cohort_rows else []:
+        pct = (r["current_price"] - r["day0_price"]) / r["day0_price"] * 100
+        lines.append(f"  {r['issuer']} ({r['ticker']}), funds: {', '.join(r['funds'])}: locked ${r['day0_price']} on {r['locked_date']} -> now ${r['current_price']} ({pct:+.1f}%)")
+    if not cohort_rows:
+        lines.append("  No cohort locked yet.")
+
+    latest_by_fund = get_latest_snapshot_per_fund()
+    by_cusip = {}
+    for row in latest_by_fund.values():
+        for h in (row.get("top_holdings") or []):
+            if not h.get("cusip") or not (h.get("is_new") or h.get("is_increased")):
+                continue
+            if h["cusip"] not in by_cusip:
+                by_cusip[h["cusip"]] = {"issuer": h["issuer"], "funds": []}
+            by_cusip[h["cusip"]]["funds"].append(row["fund_name"])
+    consensus = [v for v in by_cusip.values() if len(v["funds"]) >= 2]
+    lines.append("\nEMERGING MULTI-FUND CONSENSUS THIS QUARTER:")
+    if consensus:
+        for c in consensus[:10]:
+            lines.append(f"  {c['issuer']}: {', '.join(c['funds'])}")
+    else:
+        lines.append("  None this quarter.")
+
+    return "\n".join(lines)
+
+
+def maybe_generate_ai_summaries(latest_by_fund, cohort_status):
+    """Only regenerate AI summaries when something meaningful actually
+    happened -- a new quarter locking, a late-arrival top-up, or the
+    tracked cohort's price move shifting significantly -- not on every
+    single daily run, which would burn API calls for no new information."""
+    current_max_move = get_max_cohort_move()
+
+    last_dashboard = get_last_summary("dashboard")
+    last_research = get_last_summary("research")
+
+    dashboard_trigger = None
+    if cohort_status["locked_new"]:
+        dashboard_trigger = f"new quarter locked: {cohort_status['locked_new']}"
+    elif not last_dashboard:
+        dashboard_trigger = "initial summary"
+    elif abs(current_max_move - (last_dashboard.get("max_move_at_generation") or 0)) >= BIG_MOVE_THRESHOLD:
+        dashboard_trigger = f"big move: max cohort move shifted to {current_max_move:.1f}%"
+
+    research_trigger = None
+    if cohort_status["locked_new"]:
+        research_trigger = f"new quarter locked: {cohort_status['locked_new']}"
+    elif cohort_status["topped_up"]:
+        research_trigger = "cohort top-up occurred"
+    elif not last_research:
+        research_trigger = "initial summary"
+    elif abs(current_max_move - (last_research.get("max_move_at_generation") or 0)) >= BIG_MOVE_THRESHOLD:
+        research_trigger = f"big move: max cohort move shifted to {current_max_move:.1f}%"
+
+    if dashboard_trigger:
+        digest = build_dashboard_digest(latest_by_fund)
+        summary = call_gemini(DASHBOARD_PROMPT.format(digest=digest))
+        if summary:
+            save_ai_summary("dashboard", summary, dashboard_trigger, current_max_move)
+            print(f"[ai] generated dashboard summary ({dashboard_trigger})")
+
+    if research_trigger:
+        digest = build_research_digest()
+        summary = call_gemini(RESEARCH_PROMPT.format(digest=digest))
+        if summary:
+            save_ai_summary("research", summary, research_trigger, current_max_move)
+            print(f"[ai] generated research summary ({research_trigger})")
+
+
 def main():
     figi_cache = {}
 
@@ -637,14 +832,20 @@ def main():
             print(f"[error] {fund['name']}: {e}")
 
     try:
-        check_and_lock_cohort()
+        cohort_status = check_and_lock_cohort()
     except Exception as e:
         print(f"[error] cohort lock check failed: {e}")
+        cohort_status = {"locked_new": None, "topped_up": False}
 
     try:
         refresh_cohort_prices()
     except Exception as e:
         print(f"[error] cohort price refresh failed: {e}")
+
+    try:
+        maybe_generate_ai_summaries(get_latest_snapshot_per_fund(), cohort_status)
+    except Exception as e:
+        print(f"[error] AI summary generation failed: {e}")
 
 
 if __name__ == "__main__":
