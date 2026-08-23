@@ -639,16 +639,20 @@ BIG_MOVE_THRESHOLD = 15  # percentage points of change in the max cohort move
 # since the last summary, before we bother regenerating just for a price move
 
 
-def call_gemini(prompt):
+def call_gemini(prompt, _retry=True):
     """A single free-tier-eligible Gemini call. Returns None (rather than
     raising) on any failure, since a missing AI summary should never break
     the rest of the daily pipeline.
 
-    maxOutputTokens is generous (2048) because gemini-3.5-flash spends part
+    maxOutputTokens is generous (4096) because gemini-3.5-flash spends part
     of its token budget on internal "thinking" before writing the visible
     answer -- a small budget can cause the model to run out of tokens
     mid-sentence. We also explicitly check finishReason and reject anything
     that didn't finish cleanly, rather than silently saving truncated text.
+
+    Retries once after a short pause on a transient server error (5xx) --
+    those are Google-side hiccups, not something a bigger token budget or
+    a different prompt would fix.
     """
     if not GEMINI_API_KEY:
         print("[ai] GEMINI_API_KEY not set, skipping AI summary")
@@ -657,9 +661,13 @@ def call_gemini(prompt):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
         }
         r = requests.post(url, json=body, timeout=30)
+        if r.status_code >= 500 and _retry:
+            print(f"[ai] Gemini returned {r.status_code} (likely transient), retrying once after a short pause")
+            time.sleep(5)
+            return call_gemini(prompt, _retry=False)
         r.raise_for_status()
         data = r.json()
         candidate = data["candidates"][0]
@@ -721,6 +729,7 @@ DASHBOARD_PROMPT = """You are summarizing institutional 13F stock-holding disclo
 - Never recommends any action, never says "consider buying/selling", never predicts future price performance
 - Stays strictly within the data provided -- do not invent any figures, holdings, or funds not listed below
 - Ends with a brief plain-language reminder that this reflects historical, lagged disclosures, not investment advice
+- HARD LIMIT: your entire response must be under 120 words. Prioritize the single most notable pattern over covering every fund if you have to choose.
 
 DATA DIGEST:
 {digest}
@@ -733,6 +742,7 @@ RESEARCH_PROMPT = """You are summarizing a hedge-fund research tracking page for
 - Never recommends any action, never says "consider buying/selling", never predicts future price performance
 - Stays strictly within the data provided -- do not invent any figures or tickers not listed below
 - Ends with a brief plain-language reminder that this reflects historical tracking, not investment advice
+- HARD LIMIT: your entire response must be under 120 words. Prioritize the single best and single worst performer over covering every ticker if you have to choose.
 
 DATA DIGEST:
 {digest}
