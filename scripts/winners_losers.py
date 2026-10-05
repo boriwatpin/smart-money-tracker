@@ -36,6 +36,8 @@ import json
 import statistics
 from datetime import date, datetime, timedelta, timezone
 
+from urllib.parse import quote
+
 import requests
 import yfinance as yf
 
@@ -93,7 +95,9 @@ def sb_upsert(table, rows, conflict):
 
 
 def sb_delete_older_than(table, iso_ts):
-    r = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}?updated_at=lt.{iso_ts}", headers=HEADERS, timeout=60)
+    # The "+00:00" offset must be URL-encoded; a raw "+" in a query string
+    # is decoded as a space, which Postgres rejects as an invalid timestamp.
+    r = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}?updated_at=lt.{quote(iso_ts)}", headers=HEADERS, timeout=60)
     if r.status_code >= 300:
         raise RuntimeError(f"Supabase delete on {table} failed: {r.status_code} {r.text}")
 
