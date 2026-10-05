@@ -1,0 +1,40 @@
+name: Refresh winners & losers
+
+on:
+  schedule:
+    # Weekdays at 22:30 UTC, after the US market close (20:00 or 21:00 UTC
+    # depending on daylight saving), so "current price" is that day's close.
+    # Far enough from the 13:00 UTC 13F refresh that the two never overlap.
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: winners-losers
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        # yfinance is upgraded on every run: it's unofficial and breaks
+        # whenever Yahoo changes something, and fixes ship as new releases.
+        run: |
+          pip install -r scripts/requirements.txt
+          pip install --upgrade yfinance
+
+      - name: Compute winners & losers and upsert to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          cd scripts
+          python winners_losers.py
