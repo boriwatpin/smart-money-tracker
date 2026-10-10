@@ -19,6 +19,7 @@ Runtime note: with 10 funds x up to 12 quarters x price-lookup pacing, this
 can take 30-40+ minutes. That's expected for a one-time job, not a hang.
 """
 
+import os
 import time
 from fetch_13f import FUNDS, recent_13f_filings, process_filing
 
@@ -28,7 +29,15 @@ QUARTERS_OF_HISTORY = 12  # ~3 years
 def main():
     figi_cache = {}
 
-    for fund in FUNDS:
+    # Optional: BACKFILL_CIKS="0001135730" (comma-separated) backfills only
+    # those funds -- e.g. right after adding a new fund -- instead of
+    # re-processing every fund's full history. Empty = all funds.
+    only = {c.strip() for c in os.environ.get("BACKFILL_CIKS", "").split(",") if c.strip()}
+    funds = [f for f in FUNDS if not only or f["cik"] in only]
+    if only:
+        print(f"[backfill] limited to: {', '.join(f['name'] for f in funds) or 'no matching funds'}")
+
+    for fund in funds:
         try:
             filings = recent_13f_filings(fund["cik"], n=QUARTERS_OF_HISTORY)
             if not filings:
