@@ -48,3 +48,12 @@ jobs:
         run: |
           cd scripts
           python winners_losers.py
+
+      - name: Run the copycat backtest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: |
+          cd scripts
+          python backtest.py
