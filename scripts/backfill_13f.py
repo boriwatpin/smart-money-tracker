@@ -17,11 +17,16 @@ import below finds fetch_13f.py.
 
 Runtime note: with 10 funds x up to 12 quarters x price-lookup pacing, this
 can take 30-40+ minutes. That's expected for a one-time job, not a hang.
+
+ARCHIVE_ONLY=true fills only the holdings archive (holdings + filing_index)
+and leaves fund_snapshots alone. That's much faster (no price lookups), and
+it also archives LEGACY_FILERS -- old filer entities whose history belongs
+to a current fund (e.g. Pershing Square before its 2024 restructuring).
 """
 
 import os
 import time
-from fetch_13f import FUNDS, recent_13f_filings, process_filing
+from fetch_13f import FUNDS, LEGACY_FILERS, recent_13f_filings, process_filing
 
 QUARTERS_OF_HISTORY = 12  # ~3 years
 
@@ -33,7 +38,11 @@ def main():
     # those funds -- e.g. right after adding a new fund -- instead of
     # re-processing every fund's full history. Empty = all funds.
     only = {c.strip() for c in os.environ.get("BACKFILL_CIKS", "").split(",") if c.strip()}
+    archive_only = os.environ.get("ARCHIVE_ONLY", "").strip().lower() == "true"
     funds = [f for f in FUNDS if not only or f["cik"] in only]
+    if archive_only:
+        funds += [f for f in LEGACY_FILERS if not only or f["cik"] in only or f["successor_cik"] in only]
+        print("[backfill] archive-only mode: filling holdings + filing_index, fund_snapshots untouched")
     if only:
         print(f"[backfill] limited to: {', '.join(f['name'] for f in funds) or 'no matching funds'}")
 
@@ -50,7 +59,7 @@ def main():
             # stored by the time we process the next one -- same pattern as
             # the daily script, just over a longer window.
             for filing in reversed(filings):
-                process_filing(fund, filing, figi_cache)
+                process_filing(fund, filing, figi_cache, archive_only=archive_only)
                 time.sleep(0.3)
         except Exception as e:
             print(f"[error] {fund['name']}: {e}")

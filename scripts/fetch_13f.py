@@ -252,6 +252,10 @@ def parse_infotable(xml_text):
                 "value_thousands": int(value),
                 "shares": int(shares),
                 "cusip": cusip,
+                # "PUT"/"CALL" for option positions, "" for plain shares.
+                # Only the holdings archive uses these two fields.
+                "put_call": (entry.findtext("putCall") or "").strip().upper(),
+                "share_type": (entry.findtext(".//sshPrnamtType") or "").strip().upper(),
             })
     return holdings
 
@@ -269,7 +273,109 @@ def upsert_snapshot(row):
         raise RuntimeError(f"Supabase upsert failed: {r.status_code} {r.text}")
 
 
-def process_filing(fund, latest, figi_cache):
+# ---------------------------------------------------------------------
+# Holdings archive
+# ---------------------------------------------------------------------
+# fund_snapshots keeps each fund's top 25 for the existing dashboard. The
+# archive below goes deeper so cost basis and exit detection are accurate:
+#   holdings      -- top ARCHIVE_TOP_N positions per fund per quarter, with
+#                    duplicate rows combined (many funds report one stock
+#                    across several rows, one per sub-manager) and options
+#                    kept separate from shares via put_call
+#   filing_index  -- one row per fund per quarter, including the CUSIP of
+#                    every share position in the filing (not just the top
+#                    100), so "sold out" can be told apart from "shrank
+#                    below the cutoff"
+ARCHIVE_TOP_N = 100
+
+# Filers that no longer file but whose history belongs to a current fund.
+# Only the holdings archive reads these (backfill in archive-only mode), so
+# they never appear on the dashboard.
+LEGACY_FILERS = [
+    {"name": "Pershing Square Capital Management", "person": "Bill Ackman",
+     "cik": "0001336528", "successor_cik": "0002026053"},
+]
+
+
+def _sb_write_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+    }
+
+
+def archive_filing(fund, filing, holdings, value_scale):
+    combined = {}
+    for h in holdings:
+        if not h["cusip"]:
+            continue
+        key = (h["cusip"], h.get("put_call", ""))
+        c = combined.setdefault(key, {
+            "issuer": h["issuer"], "class": h["class"], "share_type": h.get("share_type", ""),
+            "shares": 0, "value": 0,
+        })
+        c["shares"] += h["shares"]
+        c["value"] += h["value_thousands"] * value_scale
+
+    total = sum(c["value"] for c in combined.values())
+    ranked = sorted(combined.items(), key=lambda kv: kv[1]["value"], reverse=True)
+    now = datetime.now(timezone.utc).isoformat()
+
+    rows = []
+    for rank, ((cusip, put_call), c) in enumerate(ranked[:ARCHIVE_TOP_N], start=1):
+        rows.append({
+            "cik": fund["cik"],
+            "period_end": filing["period"],
+            "cusip": cusip,
+            "put_call": put_call,
+            "issuer": c["issuer"],
+            "title_of_class": c["class"],
+            "share_type": c["share_type"],
+            "shares": c["shares"],
+            "value_usd": c["value"],
+            "pct_of_portfolio": round(c["value"] / total * 100, 4) if total else 0,
+            "rank": rank,
+            "accession": filing["accession"],
+            "updated_at": now,
+        })
+
+    headers = _sb_write_headers()
+    # Replace this filing's rows outright, so a re-run never leaves stale
+    # rows behind (e.g. if ARCHIVE_TOP_N is ever lowered).
+    r = requests.delete(
+        f"{SUPABASE_URL}/rest/v1/holdings?cik=eq.{fund['cik']}&period_end=eq.{filing['period']}",
+        headers=headers, timeout=30,
+    )
+    if r.status_code >= 300:
+        raise RuntimeError(f"holdings delete failed: {r.status_code} {r.text}")
+    for i in range(0, len(rows), 200):
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/holdings", headers=headers,
+                          data=json.dumps(rows[i:i + 200]), timeout=30)
+        if r.status_code >= 300:
+            raise RuntimeError(f"holdings insert failed: {r.status_code} {r.text}")
+
+    index_row = {
+        "cik": fund["cik"],
+        "fund_name": fund["name"],
+        "period_end": filing["period"],
+        "filed_date": filing["filed"],
+        "accession": filing["accession"],
+        "total_value_usd": total,
+        "position_count": len(combined),
+        "archived_count": len(rows),
+        "share_cusips": sorted({cusip for (cusip, pc) in combined if pc == ""}),
+        "updated_at": now,
+    }
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/filing_index?on_conflict=cik,period_end",
+                      headers=headers, data=json.dumps([index_row]), timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"filing_index upsert failed: {r.status_code} {r.text}")
+    print(f"[archive] {fund['name']} {filing['period']}: {len(rows)} of {len(combined)} positions archived")
+
+
+def process_filing(fund, latest, figi_cache, archive_only=False):
     infotable_url = find_infotable_url(fund["cik"], latest["accession"])
     if not infotable_url:
         print(f"[warn] no infotable found for {fund['name']} ({latest['accession']})")
@@ -303,6 +409,15 @@ def process_filing(fund, latest, figi_cache):
     total_for_pct = raw_sum  # percentages are a ratio, so the scale cancels out regardless
     if value_scale != 1:
         print(f"[debug] {fund['name']} ({latest['period']}): raw value sum ${raw_sum:,} looked like thousands, scaled x1000")
+
+    # Deeper quarter-by-quarter archive (holdings + filing_index tables).
+    # Wrapped so a problem here can never block the existing snapshot below.
+    try:
+        archive_filing(fund, latest, holdings, value_scale)
+    except Exception as e:
+        print(f"[error] archive failed for {fund['name']} {latest['period']}: {e}")
+    if archive_only:
+        return
 
     top = sorted(holdings, key=lambda h: h["value_thousands"], reverse=True)[:TOP_N_HOLDINGS]
 
