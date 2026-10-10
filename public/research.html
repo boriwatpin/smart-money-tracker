@@ -5,54 +5,92 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Research Candidates — Smart Money Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0B0E11; --panel:#12161C; --panel-2:#171C23;
-    --border:#232B35; --border-soft:#1A2029;
-    --text:#E6E9EF; --text-dim:#8B95A5; --text-faint:#5B6572;
-    --amber:#E8B44C; --amber-dim:#8A6A2C;
-    --green:#3ED598; --green-dim:#1F6B4C;
-    --red:#FF5C5C; --red-dim:#7A2E2E;
-    --blue:#5B9DF5; --blue-dim:#2C4A7A;
+    --bg:#F4F6F9; --panel:#FFFFFF; --panel-2:#F6F8FB;
+    --border:#D5DBE3; --border-soft:#E8ECF1;
+    --text:#18212F; --text-dim:#4A5566; --text-faint:#677285;
+    --navy:#10264A; --navy-2:#1C3A68; --navy-tint:#E9EEF6;
+    --amber:#9C7A35; --amber-dim:#D8C7A0;
+    --green:#1D7A4A; --green-dim:#A9D4BC;
+    --red:#B3261E; --red-dim:#EDB7B2;
+    --blue:#2C5AA0; --blue-dim:#B9CAE6;
+    --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+    --sans:'Source Sans 3','Segoe UI',Helvetica,Arial,sans-serif;
   }
   *{box-sizing:border-box;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
   .app{max-width:1000px;margin:0 auto;padding:28px 20px 60px;}
 
   .masthead{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px;}
-  .masthead h1{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:24px;margin:0;letter-spacing:-0.02em;}
+  .masthead h1{font-family:var(--serif);font-weight:700;font-size:24px;margin:0;letter-spacing:-0.02em;}
   .masthead h1 span{color:var(--amber);}
-  .masthead .sub{color:var(--text-dim);font-size:13px;margin-top:4px;}
-  .back-link{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#F2C868,var(--amber));color:#1a1206;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:11.5px;padding:8px 16px;border-radius:3px;text-decoration:none;margin-top:12px;box-shadow:0 2px 10px rgba(232,180,76,0.35);transition:transform .12s ease,box-shadow .12s ease;}
+  .masthead .sub{color:var(--text-dim);font-size:15px;margin-top:4px;}
+  .back-link{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#F2C868,var(--amber));color:#1a1206;font-family:var(--sans);font-weight:600;font-size:13.5px;padding:8px 16px;border-radius:3px;text-decoration:none;margin-top:12px;box-shadow:0 2px 10px rgba(232,180,76,0.35);transition:transform .12s ease,box-shadow .12s ease;}
   .back-link:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(232,180,76,0.5);color:#1a1206;}
 
-  .disclaimer{background:var(--panel);border:1px solid var(--red-dim);border-left:3px solid var(--red);padding:14px 16px;font-size:12.5px;color:var(--text-dim);margin-bottom:26px;line-height:1.6;}
+  .disclaimer{background:var(--panel);border:1px solid var(--red-dim);border-left:3px solid var(--red);padding:14px 16px;font-size:14.5px;color:var(--text-dim);margin-bottom:26px;line-height:1.6;}
   .disclaimer b{color:var(--text);}
-  .lag-warning{background:var(--panel-2);border:1px solid var(--amber-dim);border-left:3px solid var(--amber);padding:10px 14px;font-size:11.5px;color:var(--text-dim);margin-bottom:14px;line-height:1.5;}
+  .lag-warning{background:var(--panel-2);border:1px solid var(--amber-dim);border-left:3px solid var(--amber);padding:10px 14px;font-size:13.5px;color:var(--text-dim);margin-bottom:14px;line-height:1.5;}
 
-  .status-row{font-size:12px;color:var(--text-faint);margin-bottom:20px;font-family:'IBM Plex Mono',monospace;}
+  .status-row{font-size:14px;color:var(--text-faint);margin-bottom:20px;font-family:var(--sans);}
 
   .panel{background:var(--panel);border:1px solid var(--border);padding:18px;margin-bottom:22px;}
-  .panel h2{font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:600;margin:0 0 6px 0;}
-  .panel .method{font-size:11px;color:var(--text-faint);margin-bottom:14px;line-height:1.6;}
+  .panel h2{font-family:var(--serif);font-size:15px;font-weight:600;margin:0 0 6px 0;}
+  .panel .method{font-size:13px;color:var(--text-faint);margin-bottom:14px;line-height:1.6;}
 
-  table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;}
-  th{text-align:left;color:var(--text-faint);font-weight:500;padding:6px 6px;border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.04em;}
+  table{width:100%;border-collapse:collapse;font-family:var(--sans);font-size:14px;}
+  th{text-align:left;color:var(--text-faint);font-weight:500;padding:6px 6px;border-bottom:1px solid var(--border);font-size:12px;}
   td{padding:6px 6px;border-bottom:1px solid var(--border-soft);color:var(--text-dim);}
   td.tk{color:var(--text);font-weight:500;}
   .up{color:var(--green);} .down{color:var(--red);}
-  .fund-chip{font-family:'IBM Plex Mono',monospace;font-size:9.5px;background:var(--panel-2);border:1px solid var(--border-soft);padding:1px 5px;color:var(--text-dim);display:inline-block;margin:1px;}
-  .empty{color:var(--text-faint);font-size:11.5px;padding:8px 0;}
+  .fund-chip{font-family:var(--sans);font-size:11.5px;background:var(--panel-2);border:1px solid var(--border-soft);padding:1px 5px;color:var(--text-dim);display:inline-block;margin:1px;}
+  .empty{color:var(--text-faint);font-size:13.5px;padding:8px 0;}
+
+  /* ===== Report styling (matches the dashboard) ===== */
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.5;font-variant-numeric:tabular-nums lining-nums;-webkit-font-smoothing:antialiased;}
+  :focus-visible{outline:2px solid var(--blue);outline-offset:2px;}
+  .app{max-width:1060px;padding:34px 36px 72px;}
+  .masthead{border-bottom:2px solid var(--navy);padding-bottom:20px;margin-bottom:24px;}
+  .masthead h1{font-family:var(--serif);font-weight:700;font-size:34px;letter-spacing:-0.01em;color:var(--navy);}
+  .masthead h1 span{color:var(--amber);}
+  .masthead .sub{font-size:15px;color:var(--text-dim);margin-top:6px;max-width:760px;}
+  .back-link{background:var(--panel);color:var(--navy);border:1px solid var(--border);box-shadow:none;border-radius:2px;font-family:var(--sans);font-size:14px;font-weight:600;padding:8px 14px;margin-top:14px;}
+  .back-link::before{content:"\2039";font-size:18px;line-height:1;margin-right:2px;}
+  .back-link:hover{border-color:var(--navy);transform:none;box-shadow:none;color:var(--navy);}
+  .disclaimer{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--red);font-size:14.5px;line-height:1.65;padding:14px 18px;}
+  .disclaimer b{color:var(--red);}
+  .lag-warning{background:#FBF7EE;border:1px solid var(--amber-dim);border-left:3px solid var(--amber);font-size:14px;color:var(--text);}
+  .status-row{color:var(--text-faint);font-size:13.5px;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-top:3px solid var(--navy);padding:22px 24px;border-radius:2px;margin-bottom:26px;}
+  .panel h2{font-family:var(--serif);font-size:23px;font-weight:600;color:var(--navy);margin:0 0 8px;}
+  .panel .method{font-size:14px;color:var(--text-dim);line-height:1.6;max-width:820px;margin-bottom:16px;}
+  #aiSummaryContentResearch{font-family:var(--serif);font-size:17px;line-height:1.7;color:var(--text);max-width:820px;}
+  table{font-size:14.5px;}
+  th{color:var(--text-dim);font-weight:600;font-size:13px;border-bottom:1.5px solid var(--navy);padding:8px 6px;white-space:nowrap;}
+  td{padding:9px 6px;color:var(--text);border-bottom:1px solid var(--border-soft);}
+  td.tk{color:var(--navy);font-weight:700;}
+  tr:hover td{background:#F8FAFD;}
+  .up{color:var(--green);} .down{color:var(--red);}
+  .fund-chip{font-size:12px;border-radius:2px;color:var(--text-dim);padding:1px 6px;}
+  .empty{font-size:14.5px;color:var(--text-faint);}
+  #lockedCohortPanel,#listBroadening,#listFresh,#listConfirmed{overflow-x:auto;}
+  @media(max-width:768px){
+    .app{padding:22px 14px 56px;}
+    .masthead h1{font-size:28px;}
+    .panel{padding:16px 14px;}
+    .panel h2{font-size:21px;}
+  }
 </style>
 </head>
 <body>
 <div class="app">
 
   <div class="masthead">
-    <h1>Research Candidates<span>.</span></h1>
-    <div class="sub">Screening tool built from the same 10-fund 13F dataset — surfaces mechanical patterns, does not tell you what to buy.</div>
-    <a class="back-link" href="index.html">← Main dashboard</a>
+    <h1>Research candidates<span>.</span></h1>
+    <div class="sub">Screening tool built from the same 13F dataset as the dashboard — surfaces mechanical patterns, does not tell you what to buy.</div>
+    <a class="back-link" href="index.html">Back to dashboard</a>
   </div>
 
   <div class="disclaimer">
@@ -62,32 +100,32 @@
   <div class="status-row" id="statusRow">Loading data…</div>
 
   <div class="panel">
-    <h2>🤖 AI Summary</h2>
+    <h2>Briefing</h2>
     <div class="method">Generated by Gemini from the current cohort's data as soon as none exists yet, then only regenerated when something meaningful changes (new quarter locks, a late-arrival top-up, or a big cohort price move) — not a live daily digest. AI-written; treat it as a starting point, verify anything important against the actual data below.</div>
     <div id="aiSummaryContentResearch" class="empty">Loading…</div>
   </div>
 
   <div class="panel">
-    <h2>🔒 Locked Cohort Performance</h2>
-    <div class="method">Once a quarter's filings are complete across all 10 funds, this locks in the top NEW positions (combined by CUSIP where multiple funds independently bought the same stock) and tracks their price from that lock date forward — a real, dollar-based track record, not just a point-in-time screen like the lists below.</div>
+    <h2>Locked cohort performance</h2>
+    <div class="method">Once a quarter's filings are complete across all tracked funds, this locks in the top new positions (combined by CUSIP where multiple funds independently bought the same stock) and tracks their price from that lock date forward — a real, dollar-based track record, not just a point-in-time screen like the lists below.</div>
     <div id="lagBanner"></div>
     <div id="lockedCohortPanel" class="empty">Coming soon — backend cohort-locking logic not yet built.</div>
   </div>
 
   <div class="panel">
-    <h2>📈 Broadening Consensus</h2>
+    <h2>Broadening consensus</h2>
     <div class="method">Rule: stocks where the number of funds holding it has increased across the last 4 stored quarters (not flat or declining), sorted by size of the increase.</div>
     <div id="listBroadening"></div>
   </div>
 
   <div class="panel">
-    <h2>🌱 Fresh Conviction, Not Yet Priced In</h2>
-    <div class="method">Rule: positions flagged NEW or INCREASED this quarter, with an estimated price move of less than 5% (up or down) since the fund's average estimated cost — i.e. the market hasn't moved much yet since the disclosed buying happened.</div>
+    <h2>Fresh conviction, not yet priced in</h2>
+    <div class="method">Rule: positions flagged as new or increased this quarter, with an estimated price move of less than 5% (up or down) since the fund's average estimated cost — i.e. the market hasn't moved much yet since the disclosed buying happened.</div>
     <div id="listFresh"></div>
   </div>
 
   <div class="panel">
-    <h2>✅ Broad Consensus + Price Confirmation</h2>
+    <h2>Broad consensus with price confirmation</h2>
     <div class="method">Rule: held by 2+ funds, where at least one fund's estimated price move since their average cost is positive — i.e. multiple funds agree, and the price has moved in the direction of that thesis so far.</div>
     <div id="listConfirmed"></div>
   </div>
@@ -182,7 +220,7 @@ function buildFreshConviction(latestByCik) {
     <tr>
       <td class="tk">${shortName(i.issuer)}</td>
       <td>${i.fund.split(" ")[0]}</td>
-      <td>${i.isNew ? '<span class="up">NEW</span>' : '<span style="color:var(--blue)">ADDED</span>'}</td>
+      <td>${i.isNew ? '<span class="up">New</span>' : '<span style="color:var(--blue)">Added</span>'}</td>
       <td>${i.pct}%</td>
       <td>$${i.avg} → $${i.current} <span class="${i.change >= 0 ? "up" : "down"}">${i.change >= 0 ? "+" : ""}${i.change}%</span></td>
     </tr>`).join("");
@@ -247,7 +285,7 @@ function renderLagBanner(latestByCik, cohortData) {
 
 function buildLockedCohort(rows) {
   if (!rows || rows.length === 0) {
-    return '<div class="empty">No cohort locked yet — waiting for all 10 funds to align on the same latest quarter.</div>';
+    return '<div class="empty">No cohort locked yet — waiting for all tracked funds to file the same latest quarter.</div>';
   }
 
   const byPeriod = {};
@@ -273,7 +311,7 @@ function buildLockedCohort(rows) {
         const refPct = ((r.current_price - r.avg_price_quarter) / r.avg_price_quarter) * 100;
         const refCls = refPct >= 0 ? "up" : "down";
         const refArrow = refPct >= 0 ? "▲" : "▼";
-        refCell = `<span style="color:var(--text-faint);font-size:10.5px;">$${r.avg_price_quarter} → $${r.current_price}<br><span class="${refCls}">${refArrow} ${Math.abs(refPct).toFixed(1)}%</span></span>`;
+        refCell = `<span style="color:var(--text-faint);font-size:12.5px;">$${r.avg_price_quarter} → $${r.current_price}<br><span class="${refCls}">${refArrow} ${Math.abs(refPct).toFixed(1)}%</span></span>`;
       }
       return `
         <tr>
@@ -289,7 +327,7 @@ function buildLockedCohort(rows) {
     }).join("");
 
     return `
-      <div style="font-size:11px;color:var(--text-faint);margin-bottom:10px;">
+      <div style="font-size:13px;color:var(--text-faint);margin-bottom:10px;">
         ${period} cohort — locked ${lockedDate} · avg since lock:
         <span class="${avgCls}">${avgArrow} ${Math.abs(avgPerf).toFixed(1)}%</span>
       </div>
@@ -317,8 +355,8 @@ async function loadAiSummary(subject, elementId) {
   const row = data[0];
   const genDate = new Date(row.generated_at).toLocaleString();
   el.innerHTML = `
-    <div style="font-size:13px;line-height:1.6;color:var(--text);">${row.summary_text}</div>
-    <div style="font-size:10px;color:var(--text-faint);margin-top:10px;">Generated ${genDate} · Trigger: ${row.trigger_reason || "—"} · AI-written (Gemini) — verify against the data below</div>`;
+    <div style="font-size:15px;line-height:1.6;color:var(--text);">${row.summary_text}</div>
+    <div style="font-size:12px;color:var(--text-faint);margin-top:10px;">Generated ${genDate} · Trigger: ${row.trigger_reason || "—"} · AI-written (Gemini) — verify against the data below</div>`;
 }
 
 async function loadData() {
