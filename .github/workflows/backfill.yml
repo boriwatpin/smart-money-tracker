@@ -1,7 +1,12 @@
 name: Backfill 13F history (manual, one-time)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      ciks:
+        description: "Only these CIKs, comma-separated (leave blank for all funds)"
+        required: false
+        default: ""
   # Intentionally no schedule -- this is a one-time (or occasional) job.
   # The daily "Refresh 13F data" workflow handles ongoing updates.
 
@@ -23,6 +28,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          BACKFILL_CIKS: ${{ inputs.ciks }}
         run: |
           cd scripts
           python backfill_13f.py
