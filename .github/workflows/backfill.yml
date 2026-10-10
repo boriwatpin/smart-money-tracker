@@ -7,6 +7,11 @@ on:
         description: "Only these CIKs, comma-separated (leave blank for all funds)"
         required: false
         default: ""
+      archive_only:
+        description: "Archive only: fill the holdings archive, leave the dashboard data alone"
+        type: boolean
+        required: false
+        default: false
   # Intentionally no schedule -- this is a one-time (or occasional) job.
   # The daily "Refresh 13F data" workflow handles ongoing updates.
 
@@ -29,6 +34,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           BACKFILL_CIKS: ${{ inputs.ciks }}
+          ARCHIVE_ONLY: ${{ inputs.archive_only }}
         run: |
           cd scripts
           python backfill_13f.py
