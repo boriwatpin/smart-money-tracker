@@ -152,6 +152,17 @@
   @media(max-width:600px){.wl-table .since,.wl-table .px{display:none;}.wl-metrics{grid-template-columns:1fr 1fr;}}
   .wl-table td .iss{display:block;font-size:10px;color:var(--text-faint);font-weight:400;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .wl-old{color:var(--text-faint);border:1px solid var(--border);font-size:9px;padding:0 4px;margin-left:4px;}
+  .wl-tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:14px;overflow-x:auto;}
+  .wl-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-family:'Inter',sans-serif;font-size:13px;padding:8px 14px;cursor:pointer;white-space:nowrap;}
+  .wl-tab.on{color:var(--text);border-bottom-color:var(--amber);}
+  .wl-tab:hover{color:var(--text);}
+  .wl-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .wl-chip{display:flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--border-soft);color:var(--text-faint);font-family:'IBM Plex Mono',monospace;font-size:10.5px;padding:4px 8px;cursor:pointer;}
+  .wl-chip.on{color:var(--text);border-color:var(--border);}
+  .wl-chip .sw{display:inline-block;width:16px;height:0;}
+  .wl-chip:not(.on) .sw{opacity:.35;}
+  .wl-chart-wrap{position:relative;height:300px;}
+  .wl-foot{font-size:10.5px;color:var(--text-faint);margin-top:12px;line-height:1.6;}
 </style>
 </head>
 <body>
@@ -271,7 +282,7 @@
 
     <div class="cross-section" id="section-winners" style="scroll-margin-top:20px;">
       <div class="cross-title">🏆 Winners &amp; Losers</div>
-      <div class="cross-sub">Estimated cost basis vs. the latest market close for every position in each fund's latest top 25. 13F filings never disclose trade prices, so cost is estimated: shares added in a quarter are priced at that quarter's average daily close (split-adjusted), sells keep the average cost. Returns assume the fund still holds the position, which may no longer be true given the 45-day filing lag.</div>
+      <div class="cross-sub">Estimated cost basis vs. the latest market close for each fund's top 25 positions, plus the trades they've exited. 13F filings never disclose trade prices, so cost is estimated: shares added in a quarter are priced at that quarter's average daily close (split-adjusted), sells keep the average cost. The cost history comes from a deeper top-100 archive, so positions that grew into the top 25 keep their earlier buys. Open returns assume the fund still holds the position, which may no longer be true given the 45-day filing lag.</div>
       <div class="cross-panel" style="margin-bottom:20px;">
         <h3>🤖 AI Summary</h3>
         <div class="panel-note">Regenerated after each weekday price refresh. The AI only explains figures computed by the script; it does not calculate anything itself. Verify against the tables below.</div>
@@ -1346,171 +1357,371 @@ function toggleHistory(i) {
 }
 
 // ---------------------------------------------------------------------
-// Winners & Losers (reads position_pnl, written by scripts/winners_losers.py)
+// Winners & Losers -- reads position_pnl, closed_positions and
+// fund_pnl_daily, written nightly by scripts/winners_losers.py.
+// To keep Supabase data transfer low, only each fund's top 25 is fetched,
+// and the Closed trades and Over time data load on first click.
 // ---------------------------------------------------------------------
-let wlRows = [];
-let wlFund = "all";
-let wlSort = "pct";
-let wlIncludeOld = false;
+const WL_TOP = 25;
+const WL_COLORS = ["#5B9DF5", "#E8B44C", "#3ED598", "#FF5C5C", "#B48CF2", "#4FD1C5", "#F28C38", "#E879B9", "#A3BE5C", "#8B95A5", "#F5D76E", "#6FA8DC", "#D9534F"];
+const WL_DASHES = [[], [6, 4], [2, 3], [10, 3, 2, 3]];
+let wlRows = [], wlLatest = {}, wlClosed = null, wlDaily = null, wlChart = null;
+let wlFund = "all", wlSort = "pct", wlIncludeOld = false, wlTab = "open";
+let wlRange = 180, wlMetric = "median", wlChartFunds = null;
 
 function wlEsc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-
 function wlPrice(n) {
   if (n == null) return "—";
   return "$" + (n >= 1000 ? Math.round(n).toLocaleString() : Number(n).toFixed(2));
 }
-
 function wlSignedMoney(n) {
   if (n == null) return "—";
   const a = Math.abs(n);
   const body = a >= 1e9 ? (a / 1e9).toFixed(2) + "B" : a >= 1e6 ? (a / 1e6).toFixed(1) + "M" : a >= 1e3 ? (a / 1e3).toFixed(0) + "K" : a.toFixed(0);
   return (n < 0 ? "−$" : "+$") + body;
 }
-
 function wlPct(n) {
   if (n == null) return "—";
   return (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1) + "%";
 }
-
 function wlQuarter(period) {
   if (!period) return "—";
   const [y, m] = period.split("-").map(Number);
   return "Q" + (Math.floor((m - 1) / 3) + 1) + " '" + String(y).slice(2);
 }
-
-function wlShortFund(name) {
-  return (name || "").replace(/\s+(Asset Management|Management|Family Office|Associates|Advisors|Fund Management|Technologies)$/i, "").replace(/\s+Inc\.?$/i, "");
-}
-
 function wlMedian(vals) {
   if (!vals.length) return null;
   const s = [...vals].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
+function wlShortFund(name) {
+  return (name || "").replace(/\s+(Asset Management|Management|Family Office|Associates|Advisors|Fund Management|Technologies)$/i, "").replace(/\s+Inc\.?$/i, "");
+}
+function wlDaysAgo(n) {
+  return new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+}
+
+// Supabase returns at most 1000 rows per request, so page through.
+async function wlFetchAll(build) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build().range(from, from + 999);
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
 
 async function loadWinnersLosers() {
   loadAiSummary("winners_losers", "wlAiSummary");
   const el = document.getElementById("wlContent");
   if (!supabaseClient) return;
-  const { data, error } = await supabaseClient.from("position_pnl").select("*");
-  if (error) {
-    el.innerHTML = `<div class="empty">Couldn't load winners &amp; losers: ${wlEsc(error.message)}</div>`;
+  wlClosed = null;
+  wlDaily = null;
+  try {
+    const [open, latest] = await Promise.all([
+      wlFetchAll(() => supabaseClient.from("position_pnl")
+        .select("cik,fund_name,cusip,issuer,ticker,status,rank,first_seen_period,opened_in_window,est_cost,current_price,price_as_of,return_pct,unrealized_gain,other_holders")
+        .lte("rank", WL_TOP).order("cik").order("rank")),
+      wlFetchAll(() => supabaseClient.from("fund_pnl_daily")
+        .select("cik,d,closed_count,closed_hit_rate,closed_median,closed_count_all,closed_hit_rate_all,closed_median_all")
+        .gte("d", wlDaysAgo(10)).order("d", { ascending: false }).order("cik")),
+    ]);
+    wlRows = open;
+    wlLatest = {};
+    latest.forEach(r => { if (!wlLatest[r.cik]) wlLatest[r.cik] = r; });
+  } catch (e) {
+    el.innerHTML = `<div class="empty">Couldn't load winners &amp; losers: ${wlEsc(e.message)}</div>`;
     return;
   }
-  if (!data || data.length === 0) {
+  if (!wlRows.length) {
     el.innerHTML = '<div class="empty">No data yet. Run Actions → Refresh winners &amp; losers → Run workflow.</div>';
     return;
   }
-  wlRows = data;
   renderWinnersLosers();
 }
 
-function wlSetFilter(kind, value) {
-  if (kind === "fund") wlFund = value;
+function wlSet(kind, value) {
+  if (kind === "fund") { wlFund = value; wlChartFunds = null; }
   if (kind === "sort") wlSort = value;
   if (kind === "old") wlIncludeOld = value;
+  if (kind === "tab") wlTab = value;
+  if (kind === "range") wlRange = Number(value);
+  if (kind === "metric") wlMetric = value;
   renderWinnersLosers();
 }
 
-function wlTable(rows, holders, key) {
+function wlToggleChartFund(cik) {
+  const set = new Set(wlChartFunds || []);
+  set.has(cik) ? set.delete(cik) : set.add(cik);
+  wlChartFunds = [...set];
+  renderWinnersLosers();
+}
+
+function renderWinnersLosers() {
+  const el = document.getElementById("wlContent");
+  if (wlChart) { wlChart.destroy(); wlChart = null; }
+
+  const funds = {};
+  wlRows.forEach(r => { funds[r.cik] = r.fund_name; });
+  const fundOptions = Object.entries(funds).sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([cik, name]) => `<option value="${cik}" ${wlFund === cik ? "selected" : ""}>${wlEsc(name)}</option>`).join("");
+  const tab = (id, label) => `<button class="wl-tab ${wlTab === id ? "on" : ""}" role="tab" aria-selected="${wlTab === id}" onclick="wlSet('tab','${id}')">${label}</button>`;
+
+  let body;
+  if (wlTab === "open") body = wlRenderOpen();
+  else if (wlTab === "closed") body = wlClosed ? wlRenderClosed() : wlLoading(wlLoadClosed);
+  else body = wlDaily ? wlRenderTime() : wlLoading(wlLoadDaily);
+
+  el.innerHTML = `
+    <div class="wl-tabs" role="tablist">${tab("open", "Open positions")}${tab("closed", "Closed trades")}${tab("time", "Over time")}</div>
+    <div class="wl-controls">
+      <select onchange="wlSet('fund', this.value)" aria-label="Fund">
+        <option value="all" ${wlFund === "all" ? "selected" : ""}>All funds</option>${fundOptions}
+      </select>
+      ${wlTab === "time" ? `
+        <select onchange="wlSet('metric', this.value)" aria-label="Metric">
+          <option value="median" ${wlMetric === "median" ? "selected" : ""}>Median return</option>
+          <option value="hit" ${wlMetric === "hit" ? "selected" : ""}>Hit rate</option>
+        </select>
+        <select onchange="wlSet('range', this.value)" aria-label="Range">
+          <option value="90" ${wlRange === 90 ? "selected" : ""}>3 months</option>
+          <option value="180" ${wlRange === 180 ? "selected" : ""}>6 months</option>
+          <option value="365" ${wlRange === 365 ? "selected" : ""}>1 year</option>
+        </select>` : `
+        <select onchange="wlSet('sort', this.value)" aria-label="Rank by">
+          <option value="pct" ${wlSort === "pct" ? "selected" : ""}>Rank by % return</option>
+          <option value="usd" ${wlSort === "usd" ? "selected" : ""}>Rank by $ gain</option>
+        </select>`}
+      <label><input type="checkbox" ${wlIncludeOld ? "checked" : ""} onchange="wlSet('old', this.checked)"> Include positions held before tracking began</label>
+    </div>
+    ${body}`;
+
+  if (wlTab === "time" && wlDaily) wlDrawChart();
+}
+
+function wlLoading(loader) {
+  loader().then(renderWinnersLosers).catch(e => {
+    document.getElementById("wlContent").insertAdjacentHTML("beforeend", `<div class="empty">Couldn't load: ${wlEsc(e.message)}</div>`);
+  });
+  return '<div class="empty">Loading…</div>';
+}
+
+async function wlLoadClosed() {
+  wlClosed = await wlFetchAll(() => supabaseClient.from("closed_positions")
+    .select("cik,fund_name,ticker,issuer,opened_period,closed_period,opened_in_window,best_rank,est_cost,est_exit,realized_return_pct,realized_gain")
+    .lte("best_rank", WL_TOP).order("closed_period", { ascending: false }).order("cik").order("cusip").order("opened_period"));
+}
+
+async function wlLoadDaily() {
+  wlDaily = await wlFetchAll(() => supabaseClient.from("fund_pnl_daily")
+    .select("cik,fund_name,d,median_return,hit_rate,median_return_all,hit_rate_all")
+    .gte("d", wlDaysAgo(366)).order("d").order("cik"));
+}
+
+function wlMetricCards(cards) {
+  return `<div class="wl-metrics">${cards.map(([label, val, cls]) =>
+    `<div class="wl-metric"><div class="label">${label}</div><div class="val ${cls || ""}">${val}</div></div>`).join("")}</div>`;
+}
+
+function wlOpenTable(rows, key) {
   if (!rows.length) return '<div style="color:var(--text-faint);font-size:11.5px;padding:10px 0;">None in this view.</div>';
   return `<div class="wl-table-wrap"><table class="holdings-table wl-table">
     <tr><th>Ticker</th><th>Fund</th><th class="since">Since</th><th class="num px">Est. cost</th><th class="num px">Now</th><th class="num">${key === "usd" ? "Gain" : "Return"}</th></tr>
     ${rows.map(r => {
-      const others = (holders[r.cusip] || 1) - 1;
-      const cls = r.return_pct >= 0 ? "up" : "down";
       const main = key === "usd" ? wlSignedMoney(r.unrealized_gain) : wlPct(r.return_pct);
       const sub = key === "usd" ? wlPct(r.return_pct) : wlSignedMoney(r.unrealized_gain);
       const since = r.opened_in_window ? wlQuarter(r.first_seen_period)
-        : `≤${wlQuarter(r.first_seen_period)}<span class="wl-old" title="Already held when stored history begins; cost reflects the price at that point, not the real entry">OLD</span>`;
+        : `≤${wlQuarter(r.first_seen_period)}<span class="wl-old" title="Already held when our history begins; cost reflects the price at that point, not the real entry">OLD</span>`;
       return `<tr>
         <td class="tk">${wlEsc(r.ticker)}<span class="iss">${wlEsc(shortName(r.issuer))}</span></td>
-        <td>${wlEsc(wlShortFund(r.fund_name))}${others > 0 ? ` <span class="fund-chip" title="${others} other tracked fund(s) also hold this">+${others}</span>` : ""}</td>
+        <td>${wlEsc(wlShortFund(r.fund_name))}${r.other_holders > 0 ? ` <span class="fund-chip" title="${r.other_holders} other tracked fund(s) also hold this">+${r.other_holders}</span>` : ""}</td>
         <td class="since">${since}</td>
         <td class="num px">${wlPrice(r.est_cost)}</td>
         <td class="num px">${wlPrice(r.current_price)}</td>
-        <td class="num"><span class="${cls}">${main}</span><span class="iss" style="margin-left:auto;">${sub}</span></td>
+        <td class="num"><span class="${r.return_pct >= 0 ? "up" : "down"}">${main}</span><span class="iss">${sub}</span></td>
       </tr>`;
     }).join("")}
   </table></div>`;
 }
 
-function renderWinnersLosers() {
-  const el = document.getElementById("wlContent");
-  const holders = {};
-  wlRows.forEach(r => { holders[r.cusip] = (holders[r.cusip] || 0) + 1; });
-
+function wlRenderOpen() {
   const priced = wlRows.filter(r => r.status === "priced" && r.return_pct != null && (wlIncludeOld || r.opened_in_window));
   const pool = wlFund === "all" ? priced : priced.filter(r => r.cik === wlFund);
   const key = wlSort === "usd" ? "unrealized_gain" : "return_pct";
   const sorted = [...pool].sort((a, b) => b[key] - a[key]);
   const winners = sorted.filter(r => r[key] > 0).slice(0, 10);
   const losers = sorted.filter(r => r[key] < 0).reverse().slice(0, 10);
-
   const rets = pool.map(r => r.return_pct);
   const med = wlMedian(rets);
-  const inProfit = rets.length ? Math.round(rets.filter(x => x > 0).length / rets.length * 100) : null;
   const totalGain = pool.reduce((s, r) => s + (r.unrealized_gain || 0), 0);
   const unpriced = wlRows.filter(r => r.status !== "priced" && (wlFund === "all" || r.cik === wlFund)).length;
   const asOf = pool.reduce((m, r) => (r.price_as_of && r.price_as_of > m ? r.price_as_of : m), "");
-
-  const funds = {};
-  wlRows.forEach(r => { funds[r.cik] = r.fund_name; });
-  const fundOptions = Object.entries(funds).sort((a, b) => a[1].localeCompare(b[1]))
-    .map(([cik, name]) => `<option value="${cik}" ${wlFund === cik ? "selected" : ""}>${wlEsc(name)}</option>`).join("");
+  const sfx = wlIncludeOld ? "_all" : "";
 
   const byFund = {};
   priced.forEach(r => { (byFund[r.cik] = byFund[r.cik] || []).push(r); });
   const scoreRows = Object.values(byFund).filter(rs => rs.length >= 3).map(rs => {
     const v = rs.map(r => r.return_pct);
-    const best = rs.reduce((a, b) => (b.return_pct > a.return_pct ? b : a));
-    const worst = rs.reduce((a, b) => (b.return_pct < a.return_pct ? b : a));
-    return { name: wlShortFund(rs[0].fund_name), n: rs.length, hit: Math.round(v.filter(x => x > 0).length / v.length * 100), med: wlMedian(v), best, worst };
+    const latest = wlLatest[rs[0].cik] || {};
+    return {
+      name: wlShortFund(rs[0].fund_name), n: rs.length, hit: Math.round(v.filter(x => x > 0).length / v.length * 100), med: wlMedian(v),
+      best: rs.reduce((a, b) => (b.return_pct > a.return_pct ? b : a)), worst: rs.reduce((a, b) => (b.return_pct < a.return_pct ? b : a)),
+      cCount: latest["closed_count" + sfx], cHit: latest["closed_hit_rate" + sfx],
+    };
   }).sort((a, b) => b.med - a.med);
 
-  el.innerHTML = `
-    <div class="wl-controls">
-      <select onchange="wlSetFilter('fund', this.value)">
-        <option value="all" ${wlFund === "all" ? "selected" : ""}>All funds</option>${fundOptions}
-      </select>
-      <select onchange="wlSetFilter('sort', this.value)">
-        <option value="pct" ${wlSort === "pct" ? "selected" : ""}>Rank by % return</option>
-        <option value="usd" ${wlSort === "usd" ? "selected" : ""}>Rank by $ gain</option>
-      </select>
-      <label><input type="checkbox" ${wlIncludeOld ? "checked" : ""} onchange="wlSetFilter('old', this.checked)"> Include positions held before tracking began</label>
-    </div>
-    <div class="wl-metrics">
-      <div class="wl-metric"><div class="label">Positions priced</div><div class="val">${pool.length}</div></div>
-      <div class="wl-metric"><div class="label">In profit</div><div class="val">${inProfit == null ? "—" : inProfit + "%"}</div></div>
-      <div class="wl-metric"><div class="label">Median return</div><div class="val ${med >= 0 ? "up" : "down"}">${wlPct(med)}</div></div>
-      <div class="wl-metric"><div class="label">Est. unrealized</div><div class="val ${totalGain >= 0 ? "up" : "down"}">${pool.length ? wlSignedMoney(totalGain) : "—"}</div></div>
-    </div>
+  return `
+    ${wlMetricCards([
+      ["Positions priced", pool.length],
+      ["In profit", rets.length ? Math.round(rets.filter(x => x > 0).length / rets.length * 100) + "%" : "—"],
+      ["Median return", wlPct(med), med >= 0 ? "up" : "down"],
+      ["Est. unrealized", pool.length ? wlSignedMoney(totalGain) : "—", totalGain >= 0 ? "up" : "down"],
+    ])}
     <div class="cross-grid">
-      <div class="cross-panel"><h3 class="up">▲ Top winners</h3>${wlTable(winners, holders, wlSort)}</div>
-      <div class="cross-panel"><h3 class="down">▼ Top losers</h3>${wlTable(losers, holders, wlSort)}</div>
+      <div class="cross-panel"><h3 class="up">▲ Top winners</h3>${wlOpenTable(winners, wlSort)}</div>
+      <div class="cross-panel"><h3 class="down">▼ Top losers</h3>${wlOpenTable(losers, wlSort)}</div>
     </div>
     <div class="cross-panel">
       <h3>📋 Fund scorecard</h3>
-      <div class="panel-note">Hit rate = share of priced positions above estimated cost. Funds with fewer than 3 priced positions in this view are left out.${wlIncludeOld ? "" : " Only positions opened within the stored history are counted."}</div>
+      <div class="panel-note">Open: each fund's top ${WL_TOP} positions now. Hit rate = share above estimated cost. Closed: trades exited that were ever in the fund's top ${WL_TOP}. Funds with fewer than 3 priced open positions in this view are left out.</div>
       ${scoreRows.length ? `<div class="wl-table-wrap"><table class="holdings-table wl-table">
-        <tr><th>Fund</th><th class="num">Positions</th><th class="num">Hit rate</th><th class="num">Median</th><th>Best</th><th>Worst</th></tr>
+        <tr><th>Fund</th><th class="num">Open</th><th class="num">Hit rate</th><th class="num">Median</th><th class="num">Closed</th><th class="num">Closed hit rate</th><th class="since">Best</th><th class="since">Worst</th></tr>
         ${scoreRows.map(s => `<tr>
           <td class="tk">${wlEsc(s.name)}</td>
           <td class="num">${s.n}</td>
           <td class="num">${s.hit}%</td>
           <td class="num"><span class="${s.med >= 0 ? "up" : "down"}">${wlPct(s.med)}</span></td>
-          <td>${wlEsc(s.best.ticker)} <span class="up">${wlPct(s.best.return_pct)}</span></td>
-          <td>${wlEsc(s.worst.ticker)} <span class="down">${wlPct(s.worst.return_pct)}</span></td>
+          <td class="num">${s.cCount == null ? "—" : s.cCount}</td>
+          <td class="num">${s.cHit == null ? "—" : Math.round(s.cHit) + "%"}</td>
+          <td class="since">${wlEsc(s.best.ticker)} <span class="${s.best.return_pct >= 0 ? "up" : "down"}">${wlPct(s.best.return_pct)}</span></td>
+          <td class="since">${wlEsc(s.worst.ticker)} <span class="${s.worst.return_pct >= 0 ? "up" : "down"}">${wlPct(s.worst.return_pct)}</span></td>
         </tr>`).join("")}
-      </table></div>` : '<div style="color:var(--text-faint);font-size:11.5px;">Not enough priced positions yet.</div>'}
+      </table></div>` : '<div style="color:var(--text-faint);font-size:11.5px;">Not enough priced positions yet. Try including positions held before tracking began.</div>'}
     </div>
-    <div style="font-size:10.5px;color:var(--text-faint);margin-top:12px;line-height:1.6;">
+    <div class="wl-foot">
       Prices as of ${asOf || "—"} close (Yahoo Finance, split-adjusted, excludes dividends). "+N" = other tracked funds holding the same stock.
       ${unpriced ? `${unpriced} position${unpriced === 1 ? "" : "s"} couldn't be priced (no ticker match, bonds, or delisted) and ${unpriced === 1 ? "is" : "are"} left out.` : ""}
     </div>`;
+}
+
+function wlClosedTable(rows, key) {
+  if (!rows.length) return '<div style="color:var(--text-faint);font-size:11.5px;padding:10px 0;">None in this view.</div>';
+  return `<div class="wl-table-wrap"><table class="holdings-table wl-table">
+    <tr><th>Ticker</th><th>Fund</th><th class="since">Held</th><th class="num px">Entry</th><th class="num px">Exit</th><th class="num">${key === "usd" ? "Gain" : "Return"}</th></tr>
+    ${rows.map(c => {
+      const main = key === "usd" ? wlSignedMoney(c.realized_gain) : wlPct(c.realized_return_pct);
+      const sub = key === "usd" ? wlPct(c.realized_return_pct) : wlSignedMoney(c.realized_gain);
+      const from = c.opened_in_window ? wlQuarter(c.opened_period) : "≤" + wlQuarter(c.opened_period);
+      return `<tr>
+        <td class="tk">${wlEsc(c.ticker)}<span class="iss">${wlEsc(shortName(c.issuer))}</span></td>
+        <td>${wlEsc(wlShortFund(c.fund_name))}</td>
+        <td class="since">${from} → ${wlQuarter(c.closed_period)}</td>
+        <td class="num px">${wlPrice(c.est_cost)}</td>
+        <td class="num px">${wlPrice(c.est_exit)}</td>
+        <td class="num"><span class="${c.realized_return_pct >= 0 ? "up" : "down"}">${main}</span><span class="iss">${sub}</span></td>
+      </tr>`;
+    }).join("")}
+  </table></div>`;
+}
+
+function wlRenderClosed() {
+  let pool = wlClosed.filter(c => wlIncludeOld || c.opened_in_window);
+  if (wlFund !== "all") pool = pool.filter(c => c.cik === wlFund);
+  const key = wlSort === "usd" ? "realized_gain" : "realized_return_pct";
+  const sorted = [...pool].sort((a, b) => b[key] - a[key]);
+  const rets = pool.map(c => c.realized_return_pct);
+  const med = wlMedian(rets);
+  const total = pool.reduce((s, c) => s + (c.realized_gain || 0), 0);
+  return `
+    ${wlMetricCards([
+      ["Closed trades", pool.length],
+      ["Realized hit rate", rets.length ? Math.round(rets.filter(x => x > 0).length / rets.length * 100) + "%" : "—"],
+      ["Median realized", wlPct(med), med >= 0 ? "up" : "down"],
+      ["Est. realized", pool.length ? wlSignedMoney(total) : "—", total >= 0 ? "up" : "down"],
+    ])}
+    <div class="cross-grid">
+      <div class="cross-panel"><h3 class="up">▲ Best exits</h3>${wlClosedTable(sorted.filter(c => c[key] > 0).slice(0, 10), wlSort)}</div>
+      <div class="cross-panel"><h3 class="down">▼ Worst exits</h3>${wlClosedTable(sorted.filter(c => c[key] < 0).reverse().slice(0, 10), wlSort)}</div>
+    </div>
+    <div class="wl-foot">
+      A trade counts as closed when the stock disappears from the fund's full filing. Filings don't show the sell date, so the exit price is the average close of the quarter it was sold in.
+      Only positions that were ever in the fund's top ${WL_TOP} are shown. Partial sells aren't counted as closed trades.
+    </div>`;
+}
+
+function wlRenderTime() {
+  const sfx = wlIncludeOld ? "_all" : "";
+  const field = (wlMetric === "hit" ? "hit_rate" : "median_return") + sfx;
+  const from = wlDaysAgo(wlRange);
+  const rows = wlDaily.filter(r => r.d >= from && r[field] != null);
+  const names = {};
+  rows.forEach(r => { names[r.cik] = r.fund_name; });
+  const ciks = Object.keys(names).sort((a, b) => names[a].localeCompare(names[b]));
+  if (!wlChartFunds) {
+    // Default: the chosen fund, or the five funds with the most open positions shown.
+    const counts = {};
+    wlRows.forEach(r => { if (r.status === "priced") counts[r.cik] = (counts[r.cik] || 0) + 1; });
+    wlChartFunds = wlFund !== "all" ? [wlFund] : [...ciks].sort((a, b) => (counts[b] || 0) - (counts[a] || 0)).slice(0, 5);
+  }
+  if (!ciks.length) {
+    return `<div class="empty">No history in this view yet.${wlIncludeOld ? "" : " Try including positions held before tracking began."}</div>`;
+  }
+  const chips = ciks.map((cik, i) => {
+    const on = wlChartFunds.includes(cik);
+    const dash = WL_DASHES[i % WL_DASHES.length].length ? "dashed" : "solid";
+    return `<button class="wl-chip ${on ? "on" : ""}" aria-pressed="${on}" onclick="wlToggleChartFund('${cik}')">
+      <span class="sw" style="border-top:2px ${dash} ${WL_COLORS[i % WL_COLORS.length]}"></span>${wlEsc(wlShortFund(names[cik]))}</button>`;
+  }).join("");
+  return `
+    <div class="cross-panel">
+      <h3>📈 ${wlMetric === "hit" ? "Hit rate" : "Median return"} of each fund's top ${WL_TOP}</h3>
+      <div class="panel-note">Each day uses the positions from the fund's latest filing published by then, valued at that day's close. Click a fund to show or hide it.</div>
+      <div class="wl-chips">${chips}</div>
+      <div class="wl-chart-wrap"><canvas id="wlChart" role="img" aria-label="Line chart of each selected fund's ${wlMetric === "hit" ? "hit rate" : "median return"} over time"></canvas></div>
+    </div>
+    <div class="wl-foot">History starts when each position became public. Funds whose positions were all held before tracking began only appear with "Include positions held before tracking began" ticked.</div>`;
+}
+
+function wlDrawChart() {
+  const canvas = document.getElementById("wlChart");
+  if (!canvas) return;
+  const sfx = wlIncludeOld ? "_all" : "";
+  const field = (wlMetric === "hit" ? "hit_rate" : "median_return") + sfx;
+  const from = wlDaysAgo(wlRange);
+  const rows = wlDaily.filter(r => r.d >= from && r[field] != null);
+  const names = {};
+  rows.forEach(r => { names[r.cik] = r.fund_name; });
+  const ciks = Object.keys(names).sort((a, b) => names[a].localeCompare(names[b]));
+  const dates = [...new Set(rows.map(r => r.d))].sort();
+  const byKey = {};
+  rows.forEach(r => { byKey[r.cik + "|" + r.d] = Number(r[field]); });
+  const datasets = ciks.map((cik, i) => wlChartFunds.includes(cik) ? {
+    label: wlShortFund(names[cik]),
+    data: dates.map(d => byKey[cik + "|" + d] ?? null),
+    borderColor: WL_COLORS[i % WL_COLORS.length],
+    borderDash: WL_DASHES[i % WL_DASHES.length],
+    borderWidth: 2, pointRadius: 0, tension: 0.2, spanGaps: true,
+  } : null).filter(Boolean);
+  wlChart = new Chart(canvas, {
+    type: "line",
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${wlMetric === "hit" ? Math.round(ctx.raw) + "%" : wlPct(ctx.raw)}` } },
+      },
+      scales: {
+        x: { ticks: { color: "#8B95A5", font: { size: 10 }, maxTicksLimit: 7, autoSkip: true }, grid: { display: false } },
+        y: { ticks: { color: "#8B95A5", font: { size: 10 }, callback: v => (wlMetric === "hit" ? v : (v > 0 ? "+" : "") + v) + "%" }, grid: { color: "#1A2029" } },
+      },
+    },
+  });
 }
 
 renderClock();
