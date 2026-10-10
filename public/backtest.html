@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Copycat backtest — Smart Money Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F4F6F9; --panel:#FFFFFF; --panel-2:#F6F8FB;
+    --border:#D5DBE3; --border-soft:#E8ECF1;
+    --text:#18212F; --text-dim:#4A5566; --text-faint:#677285;
+    --navy:#10264A; --navy-2:#1C3A68; --navy-tint:#E9EEF6;
+    --amber:#9C7A35; --amber-dim:#D8C7A0;
+    --green:#1D7A4A; --green-dim:#A9D4BC;
+    --red:#B3261E; --red-dim:#EDB7B2;
+    --blue:#2C5AA0; --blue-dim:#B9CAE6;
+    --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+    --sans:'Source Sans 3','Segoe UI',Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  .app{max-width:1000px;margin:0 auto;padding:28px 20px 60px;}
+
+  .masthead{border-bottom:1px solid var(--border);padding-bottom:18px;margin-bottom:22px;}
+  .masthead h1{font-family:var(--serif);font-weight:700;font-size:24px;margin:0;letter-spacing:-0.02em;}
+  .masthead h1 span{color:var(--amber);}
+  .masthead .sub{color:var(--text-dim);font-size:15px;margin-top:4px;}
+  .back-link{display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#F2C868,var(--amber));color:#1a1206;font-family:var(--sans);font-weight:600;font-size:13.5px;padding:8px 16px;border-radius:3px;text-decoration:none;margin-top:12px;box-shadow:0 2px 10px rgba(232,180,76,0.35);transition:transform .12s ease,box-shadow .12s ease;}
+  .back-link:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(232,180,76,0.5);color:#1a1206;}
+
+  .disclaimer{background:var(--panel);border:1px solid var(--red-dim);border-left:3px solid var(--red);padding:14px 16px;font-size:14.5px;color:var(--text-dim);margin-bottom:26px;line-height:1.6;}
+  .disclaimer b{color:var(--text);}
+  .lag-warning{background:var(--panel-2);border:1px solid var(--amber-dim);border-left:3px solid var(--amber);padding:10px 14px;font-size:13.5px;color:var(--text-dim);margin-bottom:14px;line-height:1.5;}
+
+  .status-row{font-size:14px;color:var(--text-faint);margin-bottom:20px;font-family:var(--sans);}
+
+  .panel{background:var(--panel);border:1px solid var(--border);padding:18px;margin-bottom:22px;}
+  .panel h2{font-family:var(--serif);font-size:15px;font-weight:600;margin:0 0 6px 0;}
+  .panel .method{font-size:13px;color:var(--text-faint);margin-bottom:14px;line-height:1.6;}
+
+  table{width:100%;border-collapse:collapse;font-family:var(--sans);font-size:14px;}
+  th{text-align:left;color:var(--text-faint);font-weight:500;padding:6px 6px;border-bottom:1px solid var(--border);font-size:12px;}
+  td{padding:6px 6px;border-bottom:1px solid var(--border-soft);color:var(--text-dim);}
+  td.tk{color:var(--text);font-weight:500;}
+  .up{color:var(--green);} .down{color:var(--red);}
+  .fund-chip{font-family:var(--sans);font-size:11.5px;background:var(--panel-2);border:1px solid var(--border-soft);padding:1px 5px;color:var(--text-dim);display:inline-block;margin:1px;}
+  .empty{color:var(--text-faint);font-size:13.5px;padding:8px 0;}
+
+  /* ===== Report styling (matches the dashboard) ===== */
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.5;font-variant-numeric:tabular-nums lining-nums;-webkit-font-smoothing:antialiased;}
+  :focus-visible{outline:2px solid var(--blue);outline-offset:2px;}
+  .app{max-width:1060px;padding:34px 36px 72px;}
+  .masthead{border-bottom:2px solid var(--navy);padding-bottom:20px;margin-bottom:24px;}
+  .masthead h1{font-family:var(--serif);font-weight:700;font-size:34px;letter-spacing:-0.01em;color:var(--navy);}
+  .masthead h1 span{color:var(--amber);}
+  .masthead .sub{font-size:15px;color:var(--text-dim);margin-top:6px;max-width:760px;}
+  .back-link{background:var(--panel);color:var(--navy);border:1px solid var(--border);box-shadow:none;border-radius:2px;font-family:var(--sans);font-size:14px;font-weight:600;padding:8px 14px;margin-top:14px;}
+  .back-link::before{content:"\2039";font-size:18px;line-height:1;margin-right:2px;}
+  .back-link:hover{border-color:var(--navy);transform:none;box-shadow:none;color:var(--navy);}
+  .disclaimer{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--red);font-size:14.5px;line-height:1.65;padding:14px 18px;}
+  .disclaimer b{color:var(--red);}
+  .lag-warning{background:#FBF7EE;border:1px solid var(--amber-dim);border-left:3px solid var(--amber);font-size:14px;color:var(--text);}
+  .status-row{color:var(--text-faint);font-size:13.5px;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-top:3px solid var(--navy);padding:22px 24px;border-radius:2px;margin-bottom:26px;}
+  .panel h2{font-family:var(--serif);font-size:23px;font-weight:600;color:var(--navy);margin:0 0 8px;}
+  .panel .method{font-size:14px;color:var(--text-dim);line-height:1.6;max-width:820px;margin-bottom:16px;}
+  #aiSummaryContentResearch{font-family:var(--serif);font-size:17px;line-height:1.7;color:var(--text);max-width:820px;}
+  table{font-size:14.5px;}
+  th{color:var(--text-dim);font-weight:600;font-size:13px;border-bottom:1.5px solid var(--navy);padding:8px 6px;white-space:nowrap;}
+  td{padding:9px 6px;color:var(--text);border-bottom:1px solid var(--border-soft);}
+  td.tk{color:var(--navy);font-weight:700;}
+  tr:hover td{background:#F8FAFD;}
+  .up{color:var(--green);} .down{color:var(--red);}
+  .fund-chip{font-size:12px;border-radius:2px;color:var(--text-dim);padding:1px 6px;}
+  .empty{font-size:14.5px;color:var(--text-faint);}
+  #lockedCohortPanel,#listBroadening,#listFresh,#listConfirmed{overflow-x:auto;}
+  @media(max-width:768px){
+    .app{padding:22px 14px 56px;}
+    .masthead h1{font-size:28px;}
+    .panel{padding:16px 14px;}
+    .panel h2{font-size:21px;}
+  }
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin:4px 0 16px;overflow-x:auto;}
+  .tab{background:none;border:none;border-bottom:3px solid transparent;font-family:var(--sans);font-size:15px;font-weight:600;color:var(--text-faint);padding:10px 14px;cursor:pointer;white-space:nowrap;}
+  .tab.on{color:var(--navy);border-bottom-color:var(--navy);}
+  .tab:hover{color:var(--navy);}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;font-size:14px;color:var(--text-dim);margin:2px 0 10px;}
+  .legend span{display:flex;align-items:center;gap:7px;}
+  .legend i{display:inline-block;width:20px;height:0;}
+  .chart-wrap{position:relative;height:340px;}
+  .scroll{overflow-x:auto;}
+  #summaryTable{overflow-x:auto;}
+  .num{text-align:right;white-space:nowrap;}
+  .muted{color:var(--text-faint);}
+  .pill{display:inline-block;font-size:12.5px;font-weight:600;padding:2px 8px;border-radius:2px;}
+  .pill.prov{background:#FBF4E4;color:#7A5A16;border:1px solid var(--amber-dim);}
+  .pill.live{background:var(--navy-tint);color:var(--navy);}
+  details.round{border-bottom:1px solid var(--border-soft);}
+  details.round > summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:minmax(0,1.6fr) repeat(3,minmax(0,1fr));gap:10px;padding:11px 4px;align-items:center;font-size:14.5px;}
+  details.round > summary::-webkit-details-marker{display:none;}
+  details.round > summary .when::before{content:"\25B8";color:var(--text-faint);display:inline-block;width:16px;}
+  details.round[open] > summary .when::before{content:"\25BE";}
+  details.round > summary:hover{background:#F8FAFD;}
+  details.round > div{padding:2px 0 14px 20px;overflow-x:auto;}
+  .rounds-head{display:grid;grid-template-columns:minmax(0,1.6fr) repeat(3,minmax(0,1fr));gap:10px;padding:6px 4px;font-size:13px;font-weight:600;color:var(--text-dim);border-bottom:1.5px solid var(--navy);}
+  .method-list{margin:6px 0 0 18px;padding:0;font-size:14px;color:var(--text-dim);line-height:1.65;max-width:820px;}
+  details.how > summary{cursor:pointer;color:var(--blue);font-size:14px;margin-bottom:6px;}
+  @media(max-width:600px){
+    details.round > summary,.rounds-head{grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(0,1fr));}
+    .hide-sm{display:none;}
+    .chart-wrap{height:280px;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="masthead">
+    <h1>Copycat backtest<span>.</span></h1>
+    <div class="sub">What if you had bought what the stock-picking funds disclosed, as soon as their filings were public, holding 10 stocks at a time?</div>
+    <a class="back-link" href="index.html">Back to dashboard</a>
+  </div>
+
+  <div class="disclaimer">
+    <b>Hypothetical results, not investment advice.</b> This replays simple fixed rules on past 13F filings. The history is short (about three years, mostly a rising market), the funds were chosen partly because they're well known today, and 13Fs leave out shorts, hedges, cash and foreign stocks. Past results don't predict future ones. Use this to understand the funds, not as a signal to trade.
+  </div>
+
+  <div class="status-row" id="statusRow">Loading data…</div>
+
+  <div class="panel">
+    <h2>Growth of $10,000</h2>
+    <div class="method">Each strategy starts with $10,000 on the first trade date and pays 0.1% on every trade. Returns include dividends. <span id="liveNote"></span></div>
+    <div class="legend" id="legend"></div>
+    <div class="chart-wrap"><canvas id="growthChart" role="img" aria-label="Growth of $10,000 for each strategy and SPY"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Results</h2>
+    <div class="method">"Quarters beating SPY" counts completed holding periods (trade date to next trade date) where the strategy returned more than SPY.</div>
+    <div id="summaryTable" class="empty">Loading…</div>
+  </div>
+
+  <div class="panel">
+    <h2>Strategy detail</h2>
+    <div class="tabs" role="tablist" id="strategyTabs"></div>
+    <div id="strategyDetail" class="empty">Loading…</div>
+  </div>
+
+  <div class="panel">
+    <h2>How it works</h2>
+    <div class="method" style="margin-bottom:6px;">Funds copied: Pershing Square, Berkshire Hathaway, Appaloosa, Tiger Global, Coatue, Third Point and Duquesne. Quant and multi-manager firms (Renaissance, Citadel, Millennium, Bridgewater, Point72) and Soros are left out: their 13F positions are often hedges or short-term trades rather than ideas worth copying a quarter later.</div>
+    <ul class="method-list">
+      <li><b>Trade date:</b> the first trading day after each 13F deadline (Feb 14, May 15, Aug 14, Nov 14, moved to Monday when it falls on a weekend). Only filings published by the deadline are used, so nothing is used before it was public.</li>
+      <li><b>Consensus 10:</b> the stocks held by the most of these funds, counting every holding in each filing. Ties go to the larger combined value.</li>
+      <li><b>Best ideas 10:</b> each fund's largest position, then each fund's second largest, and so on (ordered by % of that fund's portfolio) until there are 10 different stocks.</li>
+      <li><b>Fresh buys 10:</b> positions that weren't in the fund's previous filing, ranked by % of the buying fund's portfolio. Empty slots are held in SPY.</li>
+      <li><b>Portfolio:</b> 10% in each stock, held until the next trade date. A stock that stops trading (for example after a takeover) is held at its last price, like cash, until then. Index funds and ETFs that appear in filings are skipped.</li>
+      <li><b>Live tracking:</b> from the first trade date after this page launched, the same rules keep running forward as paper portfolios. That part isn't a backtest: the picks were fixed before the returns happened.</li>
+    </ul>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const SUPABASE_URL = "https://xgjsyrvmevjzvpggkomo.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnanN5cnZtZXZqenZwZ2drb21vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyMzk3ODUsImV4cCI6MjEwMjgxNTc4NX0.kVCvQo1aaAN87Sb4udZ6sf1RYz78K_FseeF_KJjL7O8";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const STRATS = [
+  { key: "consensus", label: "Consensus 10", color: "#10264A", dash: [] },
+  { key: "best_ideas", label: "Best ideas 10", color: "#9C7A35", dash: [7, 4] },
+  { key: "fresh_buys", label: "Fresh buys 10", color: "#2E7F8C", dash: [2, 3] },
+  { key: "spy", label: "SPY", color: "#8A93A1", dash: [] },
+];
+let daily = [], picks = [], summary = {}, current = "consensus", chart = null;
+
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pct = n => n == null ? "—" : Math.abs(n) < 0.05 ? "0.0%" : (n > 0 ? "+" : "−") + Math.abs(n).toFixed(1) + "%";
+const cls = n => n == null ? "" : (n >= 0 ? "up" : "down");
+const money = n => n == null ? "—" : "$" + Math.round(n).toLocaleString();
+const price = n => n == null ? "—" : "$" + (n >= 1000 ? Math.round(n).toLocaleString() : Number(n).toFixed(2));
+function fmtDate(d) {
+  if (!d) return "—";
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+function quarterLabel(p) {
+  const [y, m] = p.split("-").map(Number);
+  return "Q" + Math.ceil(m / 3) + " " + y;
+}
+
+async function fetchAll(build) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build().range(from, from + 999);
+    if (error) throw error;
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
+
+async function load() {
+  const status = document.getElementById("statusRow");
+  try {
+    const [s, d, p] = await Promise.all([
+      fetchAll(() => supabaseClient.from("backtest_summary").select("*").order("strategy")),
+      fetchAll(() => supabaseClient.from("backtest_daily").select("strategy,d,value,live").order("d").order("strategy")),
+      fetchAll(() => supabaseClient.from("backtest_picks")
+        .select("strategy,rebalance_date,rank,ticker,issuer,reason,weight,source_period,provisional,funds_filed,funds_total,entry_price,exit_price,exit_date,return_pct")
+        .order("rebalance_date", { ascending: false }).order("strategy").order("rank")),
+    ]);
+    s.forEach(r => { summary[r.strategy] = r; });
+    daily = d;
+    picks = p;
+  } catch (e) {
+    status.textContent = "Couldn't load the backtest: " + e.message;
+    return;
+  }
+  if (!daily.length) {
+    status.textContent = "No results yet. They appear after the next nightly refresh (Actions → Refresh winners & losers).";
+    document.getElementById("summaryTable").textContent = "";
+    document.getElementById("strategyDetail").textContent = "";
+    return;
+  }
+  const any = Object.values(summary)[0];
+  status.textContent = `Backtest from ${fmtDate(any.start_date)} to ${fmtDate(any.end_date)} close.`;
+  const liveSince = any.live_since;
+  document.getElementById("liveNote").textContent = liveSince
+    ? `The shaded area, from ${fmtDate(liveSince)}, is live paper tracking rather than backtest.`
+    : "Live paper tracking starts at the next trade date and will be shaded on this chart.";
+  drawChart(liveSince);
+  renderSummary();
+  renderTabs();
+  renderDetail();
+}
+
+function drawChart(liveSince) {
+  document.getElementById("legend").innerHTML = STRATS.map(s =>
+    `<span><i style="border-top:2px ${s.dash.length ? "dashed" : "solid"} ${s.color}"></i>${s.label}</span>`).join("");
+  const dates = [...new Set(daily.map(r => r.d))].sort();
+  const byKey = {};
+  daily.forEach(r => { byKey[r.strategy + "|" + r.d] = Number(r.value); });
+  const liveIdx = liveSince ? dates.indexOf(liveSince) : -1;
+  const shade = {
+    id: "liveShade",
+    beforeDraw(c) {
+      if (liveIdx < 0) return;
+      const x = c.scales.x, a = c.chartArea, ctx = c.ctx;
+      const left = x.getPixelForValue(liveIdx);
+      ctx.save();
+      ctx.fillStyle = "rgba(16,38,74,0.06)";
+      ctx.fillRect(left, a.top, a.right - left, a.bottom - a.top);
+      ctx.restore();
+    },
+  };
+  chart = new Chart(document.getElementById("growthChart"), {
+    type: "line",
+    plugins: [shade],
+    data: {
+      labels: dates,
+      datasets: STRATS.map(s => ({
+        label: s.label, data: dates.map(d => byKey[s.key + "|" + d] ?? null),
+        borderColor: s.color, borderDash: s.dash, borderWidth: s.key === "spy" ? 1.5 : 2.2,
+        pointRadius: 0, tension: 0.15, spanGaps: true,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { title: items => fmtDate(items[0].label), label: c => ` ${c.dataset.label}: ${money(c.raw)}` } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#4A5566", maxTicksLimit: 7, font: { size: 12 }, callback: function (v) { return fmtDate(this.getLabelForValue(v)); } } },
+        y: { grid: { color: "#E8ECF1" }, ticks: { color: "#4A5566", font: { size: 12 }, callback: v => "$" + (v / 1000).toFixed(1) + "k" } },
+      },
+    },
+  });
+}
+
+function renderSummary() {
+  const rows = STRATS.map(s => {
+    const r = summary[s.key];
+    if (!r) return "";
+    const isSpy = s.key === "spy";
+    return `<tr>
+      <td class="tk">${esc(s.label)}</td>
+      <td class="num"><span class="${cls(r.total_return)}">${pct(r.total_return)}</span></td>
+      <td class="num">${pct(r.annual_return)}</td>
+      <td class="num ${r.max_drawdown < -0.05 ? "down" : ""}">${pct(r.max_drawdown)}</td>
+      <td class="num">${isSpy ? "—" : `${r.quarters_beat} of ${r.quarters_total}`}</td>
+      <td class="num hide-sm">${r.live_since ? `<span class="${cls(r.live_return)}">${pct(r.live_return)}</span>` : '<span class="muted">Not started</span>'}</td>
+    </tr>`;
+  }).join("");
+  const el = document.getElementById("summaryTable");
+  el.className = "";
+  el.innerHTML = `<table>
+    <tr><th>Strategy</th><th class="num">Total return</th><th class="num">Per year</th><th class="num">Worst drop</th><th class="num">Quarters beating SPY</th><th class="num hide-sm">Live since start</th></tr>
+    ${rows}</table>`;
+}
+
+function renderTabs() {
+  document.getElementById("strategyTabs").innerHTML = STRATS.filter(s => s.key !== "spy").map(s =>
+    `<button class="tab ${s.key === current ? "on" : ""}" role="tab" aria-selected="${s.key === current}" onclick="selectStrategy('${s.key}')">${s.label}</button>`).join("");
+}
+
+function selectStrategy(key) {
+  current = key;
+  renderTabs();
+  renderDetail();
+}
+
+function valueOn(strategy, d) {
+  const r = daily.find(x => x.strategy === strategy && x.d === d);
+  return r ? Number(r.value) : null;
+}
+
+function pickTable(rows, withReturns) {
+  return `<div class="scroll"><table>
+    <tr><th>Stock</th><th>Why it was picked</th><th class="num">Weight</th>${withReturns ? '<th class="num hide-sm">Entry</th><th class="num hide-sm">Exit</th><th class="num">Return</th>' : ""}</tr>
+    ${rows.map(r => `<tr>
+      <td class="tk">${esc(r.ticker)}<div class="muted" style="font-weight:400;font-size:12.5px;">${esc(r.issuer)}</div></td>
+      <td>${esc(r.reason)}</td>
+      <td class="num">${Number(r.weight).toFixed(0)}%</td>
+      ${withReturns ? `<td class="num hide-sm">${price(r.entry_price)}</td><td class="num hide-sm">${price(r.exit_price)}</td><td class="num"><span class="${cls(r.return_pct)}">${pct(r.return_pct)}</span></td>` : ""}
+    </tr>`).join("")}
+  </table></div>`;
+}
+
+function renderDetail() {
+  const el = document.getElementById("strategyDetail");
+  el.className = "";
+  const mine = picks.filter(p => p.strategy === current);
+  const prov = mine.filter(p => p.provisional);
+  const done = mine.filter(p => !p.provisional);
+  const dates = [...new Set(done.map(p => p.rebalance_date))].sort().reverse();
+
+  let next = "";
+  if (prov.length) {
+    const p0 = prov[0];
+    next = `<h3 style="font-family:var(--serif);color:var(--navy);font-size:19px;margin:0 0 6px;">Next trade date: ${fmtDate(p0.rebalance_date)}
+        <span class="pill prov">Provisional: ${p0.funds_filed} of ${p0.funds_total} funds have filed</span></h3>
+      <div class="method">Picks from ${quarterLabel(p0.source_period)} filings published so far. The list can change until the deadline passes.</div>
+      ${pickTable(prov, false)}`;
+  } else if (dates.length) {
+    next = `<div class="method">The next list appears here as funds file for the coming deadline. Until then the current holdings below stay in place.</div>`;
+  }
+
+  const rounds = dates.map((d, i) => {
+    const rows = done.filter(p => p.rebalance_date === d);
+    const end = i === 0 ? null : dates[i - 1];
+    const endDay = end || rows[0].exit_date;
+    const s0 = valueOn(current, d), s1 = valueOn(current, endDay);
+    const b0 = valueOn("spy", d), b1 = valueOn("spy", endDay);
+    const sr = s0 && s1 ? (s1 / s0 - 1) * 100 : null;
+    const br = b0 && b1 ? (b1 / b0 - 1) * 100 : null;
+    const live = summary[current] && summary[current].live_since && d >= summary[current].live_since;
+    return `<details class="round" ${i === 0 ? "open" : ""}>
+      <summary>
+        <span class="when">${fmtDate(d)} → ${end ? fmtDate(end) : "now"} ${live ? '<span class="pill live">Live</span>' : ""}<span class="muted hide-sm" style="font-size:13px;"> · ${quarterLabel(rows[0].source_period)} filings</span></span>
+        <span class="num"><span class="${cls(sr)}">${pct(sr)}</span></span>
+        <span class="num">${pct(br)}</span>
+        <span class="num hide-sm">${sr == null || br == null ? "—" : `<span class="${cls(sr - br)}">${pct(sr - br)}</span>`}</span>
+      </summary>
+      <div>${pickTable(rows, true)}</div>
+    </details>`;
+  }).join("");
+
+  el.innerHTML = `${next}
+    <h3 style="font-family:var(--serif);color:var(--navy);font-size:19px;margin:${next ? "26px" : "0"} 0 8px;">Holdings and returns by quarter</h3>
+    <div class="rounds-head"><span>Held</span><span class="num">Strategy</span><span class="num">SPY</span><span class="num hide-sm">Difference</span></div>
+    ${rounds || '<div class="empty">No completed trade dates yet.</div>'}`;
+}
+
+load();
+</script>
+</body>
+</html>
