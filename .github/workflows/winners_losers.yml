@@ -6,7 +6,13 @@ on:
     # depending on daylight saving), so "current price" is that day's close.
     # Far enough from the 13:00 UTC 13F refresh that the two never overlap.
     - cron: "30 22 * * 1-5"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: "Rebuild: re-download all price history and rebuild the daily fund history (use after adding a fund)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: winners-losers
@@ -15,6 +21,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # The first run downloads ~3 years of prices for every ticker the funds
+    # have held and can take 30-60 minutes; nightly runs take a few minutes.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +44,7 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          REBUILD_HISTORY: ${{ inputs.rebuild }}
         run: |
           cd scripts
           python winners_losers.py
