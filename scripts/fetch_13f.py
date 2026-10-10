@@ -48,6 +48,7 @@ FUNDS = [
     {"name": "Millennium Management", "person": "Israel Englander", "cik": "0001273087"},
     {"name": "Duquesne Family Office", "person": "Stanley Druckenmiller", "cik": "0001536411"},
     {"name": "Appaloosa Management", "person": "David Tepper", "cik": "0001656456"},
+    {"name": "Coatue Management", "person": "Philippe Laffont", "cik": "0001135730"},
 ]
 
 TOP_N_HOLDINGS = 25
