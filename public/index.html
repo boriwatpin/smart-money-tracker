@@ -643,10 +643,11 @@ function nextDeadline(now) {
     new Date(Date.UTC(year, 10, 14)),
     new Date(Date.UTC(year + 1, 1, 14))
   ];
+  // Weekends and Presidents' Day (third Monday of February) push the
+  // deadline to the next business day.
+  const isPresidentsDay = d => d.getUTCMonth() === 1 && d.getUTCDay() === 1 && d.getUTCDate() >= 15 && d.getUTCDate() <= 21;
   const adjusted = candidates.map(d => {
-    const day = d.getUTCDay();
-    if (day === 6) d.setUTCDate(d.getUTCDate() + 2);
-    if (day === 0) d.setUTCDate(d.getUTCDate() + 1);
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6 || isPresidentsDay(d)) d.setUTCDate(d.getUTCDate() + 1);
     return d;
   });
   return adjusted.find(d => d.getTime() > now.getTime());
