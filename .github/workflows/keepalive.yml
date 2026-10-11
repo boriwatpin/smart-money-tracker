@@ -1,0 +1,29 @@
+name: Keep scheduled workflows alive
+
+# GitHub turns off scheduled workflows in a public repository after 60 days
+# with no repository activity. The nightly jobs read and write Supabase but
+# never commit, so on their own they would stop about two months after your
+# last upload -- and Supabase would then pause a week later. This makes one
+# tiny commit on the 1st of every month to keep everything running.
+on:
+  schedule:
+    - cron: "17 6 1 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record a heartbeat and commit it
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/keepalive.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive.txt
+          git commit -m "Monthly keepalive [skip ci]"
+          git push
