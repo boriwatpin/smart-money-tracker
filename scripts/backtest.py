@@ -12,7 +12,8 @@ Rules (kept deliberately simple so a person could follow them by hand):
     multi-manager firms are left out: their 13F positions are often hedges
     or short-term trades, not ideas worth copying a quarter later.
   - Trade date: the first trading day after each 13F deadline (Feb 14,
-    May 15, Aug 14, Nov 14; moved to Monday if it falls on a weekend).
+    May 15, Aug 14, Nov 14; moved to the next business day if it falls on a
+    weekend or Presidents' Day).
     Only filings published by the deadline count, so nothing is used
     before it was public.
   - 10 stocks, 10% each, held until the next trade date. 0.1% cost on
@@ -72,12 +73,19 @@ STRATEGIES = {
 # Dates
 # ----------------------------------------------------------------------
 
+def is_presidents_day(d):
+    """Third Monday of February: a federal holiday, so the SEC is closed."""
+    return d.month == 2 and d.weekday() == 0 and 15 <= d.day <= 21
+
+
 def deadline_for(period_end):
-    """13F deadline for a quarter end, moved to Monday if it's a weekend."""
+    """13F deadline for a quarter end. When it falls on a weekend or a federal
+    holiday, it moves to the next business day. Presidents' Day is the only
+    holiday that can land in those few days, after the Feb 14 deadline."""
     p = date.fromisoformat(period_end)
     nominal = {3: date(p.year, 5, 15), 6: date(p.year, 8, 14), 9: date(p.year, 11, 14),
                12: date(p.year + 1, 2, 14)}[p.month]
-    while nominal.weekday() >= 5:
+    while nominal.weekday() >= 5 or is_presidents_day(nominal):
         nominal += timedelta(days=1)
     return nominal.isoformat()
 
@@ -87,9 +95,9 @@ def next_trading_day_after(day_iso, calendar):
 
 
 def expected_trade_day(deadline_iso):
-    """For a future deadline: the next weekday after it (holidays ignored)."""
+    """For a future deadline: the next weekday after it (market holidays ignored)."""
     d = date.fromisoformat(deadline_iso) + timedelta(days=1)
-    while d.weekday() >= 5:
+    while d.weekday() >= 5 or is_presidents_day(d):
         d += timedelta(days=1)
     return d.isoformat()
 
