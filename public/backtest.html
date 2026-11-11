@@ -113,10 +113,31 @@
     .hide-sm{display:none;}
     .chart-wrap{height:280px;}
   }
+
+  /* ===== Phones ===== */
+  .mobile-bar{display:none;}
+  @media(max-width:767px){
+    .app{padding:0 14px 48px;}
+    .mobile-bar{display:flex;align-items:center;gap:6px;position:sticky;top:0;z-index:15;margin:0 -14px 18px;padding:0 8px;
+      padding-top:env(safe-area-inset-top,0px);height:calc(54px + env(safe-area-inset-top,0px));background:var(--navy);color:#fff;}
+    .mobile-bar a{display:flex;align-items:center;min-height:44px;padding:0 10px;color:#C8D3E4;text-decoration:none;font-size:14.5px;font-weight:600;white-space:nowrap;}
+    .mobile-bar a.on{color:#fff;box-shadow:inset 0 -3px 0 #D8B76A;}
+    .mobile-bar .mb-back{color:#fff;font-size:20px;padding:0 10px 0 6px;}
+    .masthead h1{font-size:26px;}
+    .back-link{display:none;}
+    .panel{padding:16px 14px;}
+    .legend{gap:10px 16px;font-size:13.5px;}
+  }
 </style>
 </head>
 <body>
 <div class="app">
+  <nav class="mobile-bar" aria-label="Pages">
+    <a class="mb-back" href="index.html" aria-label="Back to dashboard">&#8249;</a>
+    <a href="index.html">Dashboard</a>
+    <a href="backtest.html" class="on" aria-current="page">Backtest</a>
+    <a href="research.html">Research</a>
+  </nav>
 
   <div class="masthead">
     <h1>Copycat backtest<span>.</span></h1>
@@ -139,7 +160,7 @@
 
   <div class="panel">
     <h2>Results</h2>
-    <div class="method">"Quarters beating SPY" counts completed holding periods (trade date to next trade date) where the strategy returned more than SPY.</div>
+    <div class="method">"Beat SPY" counts completed holding periods (trade date to next trade date) where the strategy returned more than SPY.</div>
     <div id="summaryTable" class="empty">Loading…</div>
   </div>
 
@@ -277,7 +298,12 @@ function drawChart(liveSince) {
         tooltip: { callbacks: { title: items => fmtDate(items[0].label), label: c => ` ${c.dataset.label}: ${money(c.raw)}` } },
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: "#4A5566", maxTicksLimit: 7, font: { size: 12 }, callback: function (v) { return fmtDate(this.getLabelForValue(v)); } } },
+        x: { grid: { display: false }, ticks: { color: "#4A5566", maxTicksLimit: window.innerWidth < 600 ? 4 : 7, maxRotation: 0, font: { size: 12 }, callback: function (v) {
+          const d = this.getLabelForValue(v);
+          if (window.innerWidth >= 600) return fmtDate(d);
+          const [y, m] = d.split("-").map(Number);
+          return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }) + " '" + String(y).slice(2);
+        } } },
         y: { grid: { color: "#E8ECF1" }, ticks: { color: "#4A5566", font: { size: 12 }, callback: v => "$" + (v / 1000).toFixed(1) + "k" } },
       },
     },
@@ -292,7 +318,7 @@ function renderSummary() {
     return `<tr>
       <td class="tk">${esc(s.label)}</td>
       <td class="num"><span class="${cls(r.total_return)}">${pct(r.total_return)}</span></td>
-      <td class="num">${pct(r.annual_return)}</td>
+      <td class="num hide-sm">${pct(r.annual_return)}</td>
       <td class="num ${r.max_drawdown < -0.05 ? "down" : ""}">${pct(r.max_drawdown)}</td>
       <td class="num">${isSpy ? "—" : `${r.quarters_beat} of ${r.quarters_total}`}</td>
       <td class="num hide-sm">${r.live_since ? `<span class="${cls(r.live_return)}">${pct(r.live_return)}</span>` : '<span class="muted">Not started</span>'}</td>
@@ -301,7 +327,7 @@ function renderSummary() {
   const el = document.getElementById("summaryTable");
   el.className = "";
   el.innerHTML = `<table>
-    <tr><th>Strategy</th><th class="num">Total return</th><th class="num">Per year</th><th class="num">Worst drop</th><th class="num">Quarters beating SPY</th><th class="num hide-sm">Live since start</th></tr>
+    <tr><th>Strategy</th><th class="num">Total return</th><th class="num hide-sm">Per year</th><th class="num">Worst drop</th><th class="num">Beat SPY</th><th class="num hide-sm">Live since start</th></tr>
     ${rows}</table>`;
 }
 

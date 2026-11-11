@@ -304,6 +304,76 @@
     .cross-panel{padding:16px 14px;}
     .wl-metric .val{font-size:26px;}
   }
+
+  /* ===== Phones ===== */
+  .mobile-bar,.fund-sm,.wl-table td .fund-sm,.sig-funds-sm,.tap-hint,.show-more-sm{display:none;}
+  @media(max-width:767px){
+    .side-nav.collapsed{display:none;}
+    .side-nav:not(.collapsed){width:270px;box-shadow:6px 0 30px rgba(16,38,74,.35);}
+    .nav-toggle{width:44px;height:44px;font-size:18px;}
+    .nav-item{padding:12px 10px;font-size:16px;}
+    .app{padding:0 14px 48px;}
+    .mobile-bar{display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:15;margin:0 -14px 18px;padding:0 12px;
+      padding-top:env(safe-area-inset-top,0px);height:calc(54px + env(safe-area-inset-top,0px));background:var(--navy);color:#fff;}
+    .mb-menu{display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin-left:-6px;background:none;border:none;color:#fff;cursor:pointer;}
+    .mb-brand{font-family:var(--serif);font-weight:700;font-size:18px;white-space:nowrap;}
+    .mb-brand span{color:#D8B76A;}
+    .mb-section{margin-left:auto;font-size:13px;color:#B9C7DD;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%;}
+
+    .masthead{flex-direction:column;align-items:stretch;gap:12px;padding-bottom:14px;}
+    .masthead h1{display:none;}
+    .masthead .sub{margin-top:0;font-size:14.5px;}
+    .clock{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 10px;width:100%;min-width:0;padding:10px 14px;text-align:left;border-top-width:3px;}
+    .clock .label{width:100%;}
+    .clock .deadline-date{font-size:15px;}
+    .clock .countdown{font-size:22px;}
+    .ticker-wrap{margin-bottom:16px;}
+
+    .toolbar{flex-direction:column;align-items:stretch;gap:10px;}
+    .toolbar .search-wrap{flex:none;}
+    .search-input{font-size:16px;padding:12px 14px;}
+    .toolbar .status-row{flex-direction:column;align-items:stretch;gap:8px;padding-top:0;}
+    .toolbar .status-row > span:last-child{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;}
+    .toolbar .status-row a,.toolbar .status-row button{display:flex;align-items:center;justify-content:center;min-height:44px;margin:0;text-align:center;font-size:14.5px;padding:8px 10px;}
+
+    select,input[type=text],input[type=search]{font-size:16px !important;}
+    .grid-controls,.wl-controls{display:grid;grid-template-columns:1fr;gap:10px;}
+    .grid-controls select,.wl-controls select{width:100%;min-height:44px;}
+    .grid-controls label,.wl-controls label{min-height:36px;}
+    input[type=checkbox]{width:20px;height:20px;}
+
+    details.howto > summary,details.inline-help > summary{padding-top:12px;padding-bottom:12px;}
+    .sig-chip{min-height:40px;padding:8px 12px;font-size:14px;}
+    .wl-chip,.moves-tab,.sig-more{min-height:40px;}
+    .ptab,.wl-tab{min-height:46px;}
+    .flag-new,.flag-increased,.wl-old{font-size:12px;}
+    .fund-grid:not(.funds-expanded) .fund-card:nth-child(n+5){display:none;}
+    #wlContent:not(.wl-expanded) .cross-grid .wl-table tr:nth-child(n+7){display:none;}
+    .show-more-sm{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;margin:10px 0 4px;background:var(--panel);border:1px solid var(--border);color:var(--navy);font-family:var(--sans);font-size:15px;font-weight:600;border-radius:2px;cursor:pointer;}
+    #wlContent.wl-expanded .lbl-more,#wlContent:not(.wl-expanded) .lbl-less{display:none;}
+
+    .fund-card{padding:16px;}
+    .fund-holdings .chip:nth-child(n+4){display:none;}
+    .tap-hint{display:block;font-size:12.5px;color:var(--blue);margin-top:8px;}
+    .detail{overflow-x:auto;}
+
+    .wl-table .fundcol{display:none;}
+    .wl-table td .fund-sm{display:block;color:var(--text-dim);}
+    [id^="section-"]{scroll-margin-top:66px !important;}
+    .hide-sm{display:none;}
+    .sig-funds-sm{display:block;margin-top:6px;line-height:1.9;}
+    .sig-held{font-size:12.5px;color:var(--text-faint);margin-left:4px;white-space:nowrap;}
+    .sig-more{width:100%;}
+
+    .bar-row,.conc-row{grid-template-columns:1fr auto;grid-template-areas:"label pct" "track track";row-gap:4px;margin-bottom:12px;}
+    .bar-row > .bar-label,.conc-row > .bar-label{grid-area:label;}
+    .bar-row > .bar-pct,.conc-row > .bar-pct{grid-area:pct;}
+    .bar-row > .bar-track,.conc-row > .conc-track{grid-area:track;}
+
+    .cross-section{margin-top:34px;}
+    .cross-title{font-size:22px;}
+    .wl-chart-wrap{height:280px;}
+  }
 </style>
 </head>
 <body>
@@ -340,6 +410,11 @@
   </nav>
 
   <div class="app">
+    <div class="mobile-bar" role="banner">
+      <button class="mb-menu" onclick="toggleNav()" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <span class="mb-brand">Smart Money<span>.</span>Tracker</span>
+      <span class="mb-section" id="mobileSection"></span>
+    </div>
 
     <div class="masthead">
       <div>
@@ -416,6 +491,7 @@
     <div class="fund-grid" id="fundGrid">
       <div class="empty">Connect this page to your Supabase project (see CONFIG below) to load live data.</div>
     </div>
+    <button class="show-more-sm" id="fundsMore" style="display:none" onclick="document.getElementById('fundGrid').classList.toggle('funds-expanded'); this.querySelector('.lbl-more').hidden = this.querySelector('.lbl-less').hidden; this.querySelector('.lbl-less').hidden = !this.querySelector('.lbl-more').hidden;"><span class="lbl-more" id="fundsMoreLabel">Show all funds</span><span class="lbl-less" hidden>Show fewer funds</span></button>
 
     </div>
 
@@ -600,6 +676,9 @@ function setActiveNav(id) {
   document.querySelectorAll(".nav-item").forEach(item => {
     item.classList.toggle("active", item.dataset.target === id);
   });
+  const label = document.querySelector(`.nav-item[data-target="${id}"] .nav-label`);
+  const mobileSection = document.getElementById("mobileSection");
+  if (mobileSection) mobileSection.textContent = label ? label.textContent : "";
   history.replaceState(null, "", "#" + id);
 }
 
@@ -1135,7 +1214,7 @@ function renderSignals() {
     ? (a, b) => b.heldCount - a.heldCount || b.totalValue - a.totalValue
     : (a, b) => SIG_ORDER[a.cat] - SIG_ORDER[b.cat] || b.activity - a.activity || b.heldCount - a.heldCount;
   const matching = sigRows.filter(flt.test).sort(sorter);
-  const LIMIT = 15;
+  const LIMIT = window.innerWidth < 768 ? 8 : 15;
   const shown = sigShowAll ? matching : matching.slice(0, LIMIT);
   if (!shown.length) {
     return `<div class="sig-chips">${chips}</div><div style="color:var(--text-faint);font-size:13.5px;">Nothing in this view this quarter.</div>`;
@@ -1149,7 +1228,10 @@ function renderSignals() {
       ...r.holders.filter(n => !r.buyers.includes(n)).map(n => `<span class="fund-chip">${first(n)}</span>`),
     ].join("");
     return `<tr>
-      <td><div class="tk" style="font-size:14.5px;">${shortName(r.issuer)}</div><div style="font-size:12.5px;color:var(--text-dim);margin-top:2px;">${r.note}</div></td>
+      <td><div class="tk" style="font-size:14.5px;">${shortName(r.issuer)}</div><div style="font-size:12.5px;color:var(--text-dim);margin-top:2px;">${r.note}</div><div class="sig-funds-sm">${[
+        ...r.buyers.map(n => `<span class="fund-chip buy">▲ ${first(n)}</span>`),
+        ...r.sellers.map(n => `<span class="fund-chip sell">▼ ${first(n)}</span>`),
+      ].join("")}<span class="sig-held">Held by ${r.heldCount} of ${sigTotalFunds}</span></div></td>
       <td><span style="font-size:11.5px;padding:3px 8px;border:1px solid ${c.border};color:${c.color};white-space:nowrap;">${c.label}</span></td>
       <td class="hide-sm" style="white-space:nowrap;">${r.heldCount}/${sigTotalFunds}</td>
       <td class="hide-sm" style="white-space:nowrap;">${r.totalValue ? fmtMoney(r.totalValue) : "—"}</td>
@@ -1424,6 +1506,7 @@ function renderFundGrid() {
         </div>
       </div>
       <div class="fund-holdings">${chips}</div>
+      <div class="tap-hint">Tap for all holdings and history</div>
       <div class="detail" id="detail-${i}">
         <table class="holdings-table">
           <tr><th>Ticker / issuer</th><th>% of book</th><th>Value</th><th>New-position estimate</th></tr>
@@ -1436,6 +1519,11 @@ function renderFundGrid() {
       </div>
     </div>`;
   }).join("");
+  const more = document.getElementById("fundsMore");
+  if (more) {
+    more.style.display = rows.length > 4 ? "" : "none";
+    document.getElementById("fundsMoreLabel").textContent = `Show all ${rows.length} funds`;
+  }
 }
 
 function toggleDetail(i) {
@@ -1628,15 +1716,15 @@ function wlMetricCards(cards) {
 function wlOpenTable(rows, key) {
   if (!rows.length) return '<div style="color:var(--text-faint);font-size:13.5px;padding:10px 0;">None in this view.</div>';
   return `<div class="wl-table-wrap"><table class="holdings-table wl-table">
-    <tr><th>Ticker</th><th>Fund</th><th class="since">Since</th><th class="num px">Est. cost</th><th class="num px">Now</th><th class="num">${key === "usd" ? "Gain" : "Return"}</th></tr>
+    <tr><th>Ticker</th><th class="fundcol">Fund</th><th class="since">Since</th><th class="num px">Est. cost</th><th class="num px">Now</th><th class="num">${key === "usd" ? "Gain" : "Return"}</th></tr>
     ${rows.map(r => {
       const main = key === "usd" ? wlSignedMoney(r.unrealized_gain) : wlPct(r.return_pct);
       const sub = key === "usd" ? wlPct(r.return_pct) : wlSignedMoney(r.unrealized_gain);
       const since = r.opened_in_window ? wlQuarter(r.first_seen_period)
         : `≤${wlQuarter(r.first_seen_period)}<span class="wl-old" title="Already held when our history begins; cost reflects the price at that point, not the real entry">Earlier</span>`;
       return `<tr>
-        <td class="tk">${wlEsc(r.ticker)}<span class="iss">${wlEsc(shortName(r.issuer))}</span></td>
-        <td>${wlEsc(wlShortFund(r.fund_name))}${r.other_holders > 0 ? ` <span class="fund-chip" title="${r.other_holders} other tracked fund(s) also hold this">+${r.other_holders}</span>` : ""}</td>
+        <td class="tk">${wlEsc(r.ticker)}<span class="iss">${wlEsc(shortName(r.issuer))}</span><span class="iss fund-sm">${wlEsc(wlShortFund(r.fund_name))}${r.other_holders > 0 ? ` · +${r.other_holders} funds` : ""}</span></td>
+        <td class="fundcol">${wlEsc(wlShortFund(r.fund_name))}${r.other_holders > 0 ? ` <span class="fund-chip" title="${r.other_holders} other tracked fund(s) also hold this">+${r.other_holders}</span>` : ""}</td>
         <td class="since">${since}</td>
         <td class="num px">${wlPrice(r.est_cost)}</td>
         <td class="num px">${wlPrice(r.current_price)}</td>
@@ -1684,18 +1772,19 @@ function wlRenderOpen() {
       <div class="cross-panel"><h3>Top winners</h3>${wlOpenTable(winners, wlSort)}</div>
       <div class="cross-panel"><h3>Top losers</h3>${wlOpenTable(losers, wlSort)}</div>
     </div>
+    <button class="show-more-sm" onclick="document.getElementById('wlContent').classList.toggle('wl-expanded')"><span class="lbl-more">Show top 10</span><span class="lbl-less">Show top 5</span></button>
     <div class="cross-panel">
       <h3>Fund scorecard</h3>
       <div class="panel-note">Open: each fund's top ${WL_TOP} positions now. Hit rate = share above estimated cost. Closed: trades exited that were ever in the fund's top ${WL_TOP}. Funds with fewer than 3 priced open positions in this view are left out.</div>
       ${scoreRows.length ? `<div class="wl-table-wrap"><table class="holdings-table wl-table">
-        <tr><th>Fund</th><th class="num">Open</th><th class="num">Hit rate</th><th class="num">Median</th><th class="num">Closed</th><th class="num">Closed hit rate</th><th class="since">Best</th><th class="since">Worst</th></tr>
+        <tr><th>Fund</th><th class="num">Open</th><th class="num">Hit rate</th><th class="num">Median</th><th class="num hide-sm">Closed</th><th class="num hide-sm">Closed hit rate</th><th class="since">Best</th><th class="since">Worst</th></tr>
         ${scoreRows.map(s => `<tr>
           <td class="tk">${wlEsc(s.name)}</td>
           <td class="num">${s.n}</td>
           <td class="num">${s.hit}%</td>
           <td class="num"><span class="${s.med >= 0 ? "up" : "down"}">${wlPct(s.med)}</span></td>
-          <td class="num">${s.cCount == null ? "—" : s.cCount}</td>
-          <td class="num">${s.cHit == null ? "—" : Math.round(s.cHit) + "%"}</td>
+          <td class="num hide-sm">${s.cCount == null ? "—" : s.cCount}</td>
+          <td class="num hide-sm">${s.cHit == null ? "—" : Math.round(s.cHit) + "%"}</td>
           <td class="since">${wlEsc(s.best.ticker)} <span class="${s.best.return_pct >= 0 ? "up" : "down"}">${wlPct(s.best.return_pct)}</span></td>
           <td class="since">${wlEsc(s.worst.ticker)} <span class="${s.worst.return_pct >= 0 ? "up" : "down"}">${wlPct(s.worst.return_pct)}</span></td>
         </tr>`).join("")}
@@ -1710,14 +1799,14 @@ function wlRenderOpen() {
 function wlClosedTable(rows, key) {
   if (!rows.length) return '<div style="color:var(--text-faint);font-size:13.5px;padding:10px 0;">None in this view.</div>';
   return `<div class="wl-table-wrap"><table class="holdings-table wl-table">
-    <tr><th>Ticker</th><th>Fund</th><th class="since">Held</th><th class="num px">Entry</th><th class="num px">Exit</th><th class="num">${key === "usd" ? "Gain" : "Return"}</th></tr>
+    <tr><th>Ticker</th><th class="fundcol">Fund</th><th class="since">Held</th><th class="num px">Entry</th><th class="num px">Exit</th><th class="num">${key === "usd" ? "Gain" : "Return"}</th></tr>
     ${rows.map(c => {
       const main = key === "usd" ? wlSignedMoney(c.realized_gain) : wlPct(c.realized_return_pct);
       const sub = key === "usd" ? wlPct(c.realized_return_pct) : wlSignedMoney(c.realized_gain);
       const from = c.opened_in_window ? wlQuarter(c.opened_period) : "≤" + wlQuarter(c.opened_period);
       return `<tr>
-        <td class="tk">${wlEsc(c.ticker)}<span class="iss">${wlEsc(shortName(c.issuer))}</span></td>
-        <td>${wlEsc(wlShortFund(c.fund_name))}</td>
+        <td class="tk">${wlEsc(c.ticker)}<span class="iss">${wlEsc(shortName(c.issuer))}</span><span class="iss fund-sm">${wlEsc(wlShortFund(c.fund_name))} · ${from} → ${wlQuarter(c.closed_period)}</span></td>
+        <td class="fundcol">${wlEsc(wlShortFund(c.fund_name))}</td>
         <td class="since">${from} → ${wlQuarter(c.closed_period)}</td>
         <td class="num px">${wlPrice(c.est_cost)}</td>
         <td class="num px">${wlPrice(c.est_exit)}</td>
@@ -1746,6 +1835,7 @@ function wlRenderClosed() {
       <div class="cross-panel"><h3>Best exits</h3>${wlClosedTable(sorted.filter(c => c[key] > 0).slice(0, 10), wlSort)}</div>
       <div class="cross-panel"><h3>Worst exits</h3>${wlClosedTable(sorted.filter(c => c[key] < 0).reverse().slice(0, 10), wlSort)}</div>
     </div>
+    <button class="show-more-sm" onclick="document.getElementById('wlContent').classList.toggle('wl-expanded')"><span class="lbl-more">Show top 10</span><span class="lbl-less">Show top 5</span></button>
     <div class="wl-foot">
       A trade counts as closed when the stock disappears from the fund's full filing. Filings don't show the sell date, so the exit price is the average close of the quarter it was sold in.
       Only positions that were ever in the fund's top ${WL_TOP} are shown. Partial sells aren't counted as closed trades.
@@ -1816,7 +1906,7 @@ function wlDrawChart() {
         tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${wlMetric === "hit" ? Math.round(ctx.raw) + "%" : wlPct(ctx.raw)}` } },
       },
       scales: {
-        x: { ticks: { color: "#4A5566", font: { size: 12, family: "'Source Sans 3', sans-serif" }, maxTicksLimit: 7, autoSkip: true }, grid: { display: false } },
+        x: { ticks: { color: "#4A5566", font: { size: 12, family: "'Source Sans 3', sans-serif" }, maxTicksLimit: window.innerWidth < 600 ? 4 : 7, maxRotation: 0, autoSkip: true }, grid: { display: false } },
         y: { ticks: { color: "#4A5566", font: { size: 12, family: "'Source Sans 3', sans-serif" }, callback: v => (wlMetric === "hit" ? v : (v > 0 ? "+" : "") + v) + "%" }, grid: { color: "#E8ECF1" } },
       },
     },
