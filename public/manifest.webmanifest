@@ -1,0 +1,25 @@
+{
+  "id": "./",
+  "name": "Smart Money Tracker",
+  "short_name": "Smart Money",
+  "description": "What 13 major hedge funds disclosed in their latest 13F filings, how those positions are doing, and a copycat backtest.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F6F9",
+  "theme_color": "#10264A",
+  "lang": "en",
+  "categories": ["finance", "business"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Winners & losers", "short_name": "Winners", "url": "./index.html#section-winners", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Copycat backtest", "short_name": "Backtest", "url": "./backtest.html", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Research candidates", "short_name": "Research", "url": "./research.html", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

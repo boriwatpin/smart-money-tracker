@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smart Money Tracker — 13F Positioning</title>
+<meta name="theme-color" content="#10264A">
+<meta name="description" content="What 13 major hedge funds disclosed in their latest 13F filings, how those positions are doing, and a copycat backtest.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Smart Money">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script src="theme.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -375,6 +386,7 @@
     .wl-chart-wrap{height:280px;}
   }
 </style>
+<link rel="stylesheet" href="theme.css">
 </head>
 <body>
 <div class="layout">
@@ -407,6 +419,10 @@
     <a class="nav-item" href="research.html">
       <span class="nav-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg></span><span class="nav-label">Research candidates</span>
     </a>
+    <div class="nav-footer">
+      <span class="ver" data-app-version>v—</span><span class="offline-marker" data-offline-marker hidden>Offline</span>
+      <button type="button" data-open-about>About &amp; updates</button>
+    </div>
   </nav>
 
   <div class="app">
@@ -414,6 +430,7 @@
       <button class="mb-menu" onclick="toggleNav()" aria-label="Open menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
       <span class="mb-brand">Smart Money<span>.</span>Tracker</span>
       <span class="mb-section" id="mobileSection"></span>
+      <div class="mb-theme" data-theme-picker></div>
     </div>
 
     <div class="masthead">
@@ -421,12 +438,17 @@
         <h1>Smart Money<span>.</span>Tracker</h1>
         <div class="sub" id="mastheadSub">13F institutional positioning — auto-refreshed from SEC EDGAR</div>
       </div>
-      <div class="clock">
-        <div class="label">Next 13F deadline</div>
-        <div class="deadline-date" id="deadlineDate">—</div>
-        <div class="countdown" id="countdown">—</div>
+      <div class="mast-right">
+        <div data-theme-picker></div>
+        <div class="clock">
+          <div class="label">Next 13F deadline</div>
+          <div class="deadline-date" id="deadlineDate">—</div>
+          <div class="countdown" id="countdown">—</div>
+        </div>
       </div>
     </div>
+
+    <div id="whatsNew"></div>
 
     <div id="section-overview"></div>
 
@@ -445,6 +467,7 @@
           <a href="backtest.html" class="research-btn" style="background:var(--panel);color:var(--navy);border:1px solid var(--border);">Copycat backtest</a>
           <a href="research.html" class="research-btn">Research candidates</a>
           <button onclick="loadData(); loadWinnersLosers();">↻ Refresh</button>
+          <button type="button" class="install-btn" data-install-button hidden>Install app</button>
         </span>
       </div>
     </div>
@@ -559,7 +582,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 // -----------------------------------------------------------------------
 
 let supabaseClient = null;
-if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1) {
+if (SUPABASE_URL.indexOf("YOUR-PROJECT") === -1 && window.supabase) {
   supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
@@ -876,8 +899,8 @@ function buildFundSimilarity(computed) {
       }
       const val = matrix[i][j];
       const intensity = val / maxOverlap;
-      const bg = `rgba(16,38,74,${(intensity * 0.85).toFixed(2)})`;
-      const fg = intensity > 0.5 ? "#FFFFFF" : "var(--text)";
+      const bg = `rgba(${cssVar("--heat-rgb", "16,38,74")},${(intensity * 0.85).toFixed(2)})`;
+      const fg = intensity > 0.5 ? cssVar("--heat-fg", "#FFFFFF") : "var(--text)";
       html += `<td style="background:${bg};text-align:center;color:${fg};">${val}</td>`;
     }
     html += '</tr>';
@@ -1248,7 +1271,14 @@ function renderSignals() {
     </table></div>${more}`;
 }
 
+let lastComputed = null;
+window.addEventListener("smt:themechange", () => {
+  if (lastComputed) document.getElementById("structSimilarity").innerHTML = buildFundSimilarity(lastComputed);
+  if (typeof wlTab !== "undefined" && wlTab === "time" && wlDaily) renderWinnersLosers();
+});
+
 function renderCrossFundDashboard(computed, allData) {
+  lastComputed = computed;
   document.getElementById("movesSection").innerHTML = renderMovesFeed(allData);
   document.getElementById("structConcentration").innerHTML = buildConcentrationIndex(computed);
   document.getElementById("structSector").innerHTML = buildSectorRollup(computed);
@@ -1300,8 +1330,8 @@ async function loadAiSummary(subject, elementId) {
 async function loadData() {
   document.getElementById("lastUpdated").textContent = "Loading data…";
   if (!supabaseClient) {
-    document.getElementById("lastUpdated").textContent = "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html.";
-    document.getElementById("tickerTrack").textContent = "Not connected to Supabase yet.";
+    document.getElementById("lastUpdated").textContent = window.supabase ? "Not connected to Supabase yet — edit SUPABASE_URL / SUPABASE_ANON_KEY in index.html." : "Couldn't load the data library. Check your connection and reload the page.";
+    document.getElementById("tickerTrack").textContent = window.supabase ? "Not connected to Supabase yet." : "Data unavailable.";
     return;
   }
 
@@ -1543,6 +1573,17 @@ function toggleHistory(i) {
 // and the Closed trades and Over time data load on first click.
 // ---------------------------------------------------------------------
 const WL_TOP = 25;
+
+// Colours that change with the light/dark theme (defined in theme.css).
+function cssVar(name, fallback) {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch (e) { return fallback; }
+}
+function isDark() { return document.documentElement.getAttribute("data-theme") === "dark"; }
+const WL_COLORS_DARK = ["#8FB3F0", "#D4B26A", "#4FB3C2", "#F0766D", "#A3B1CC", "#8DBB5A", "#B98AD0", "#E58A4F", "#4CC38A", "#AEB7C6", "#7FA8F0", "#D9708F", "#A5B36E"];
+function wlColor(i) { const p = isDark() ? WL_COLORS_DARK : WL_COLORS; return p[i % p.length]; }
 const WL_COLORS = ["#10264A", "#9C7A35", "#2E7F8C", "#B3261E", "#5B6E91", "#5E8C2E", "#7E4F8E", "#C0652B", "#1D7A4A", "#8A93A1", "#3C6FB0", "#8C2F4B", "#55623A"];
 const WL_DASHES = [[], [6, 4], [2, 3], [10, 3, 2, 3]];
 let wlRows = [], wlLatest = {}, wlClosed = null, wlDaily = null, wlChart = null;
@@ -1863,7 +1904,7 @@ function wlRenderTime() {
     const on = wlChartFunds.includes(cik);
     const dash = WL_DASHES[i % WL_DASHES.length].length ? "dashed" : "solid";
     return `<button class="wl-chip ${on ? "on" : ""}" aria-pressed="${on}" onclick="wlToggleChartFund('${cik}')">
-      <span class="sw" style="border-top:2px ${dash} ${WL_COLORS[i % WL_COLORS.length]}"></span>${wlEsc(wlShortFund(names[cik]))}</button>`;
+      <span class="sw" style="border-top:2px ${dash} ${wlColor(i)}"></span>${wlEsc(wlShortFund(names[cik]))}</button>`;
   }).join("");
   return `
     <div class="cross-panel">
@@ -1891,7 +1932,7 @@ function wlDrawChart() {
   const datasets = ciks.map((cik, i) => wlChartFunds.includes(cik) ? {
     label: wlShortFund(names[cik]),
     data: dates.map(d => byKey[cik + "|" + d] ?? null),
-    borderColor: WL_COLORS[i % WL_COLORS.length],
+    borderColor: wlColor(i),
     borderDash: WL_DASHES[i % WL_DASHES.length],
     borderWidth: 2, pointRadius: 0, tension: 0.2, spanGaps: true,
   } : null).filter(Boolean);
@@ -1906,8 +1947,8 @@ function wlDrawChart() {
         tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${wlMetric === "hit" ? Math.round(ctx.raw) + "%" : wlPct(ctx.raw)}` } },
       },
       scales: {
-        x: { ticks: { color: "#4A5566", font: { size: 12, family: "'Source Sans 3', sans-serif" }, maxTicksLimit: window.innerWidth < 600 ? 4 : 7, maxRotation: 0, autoSkip: true }, grid: { display: false } },
-        y: { ticks: { color: "#4A5566", font: { size: 12, family: "'Source Sans 3', sans-serif" }, callback: v => (wlMetric === "hit" ? v : (v > 0 ? "+" : "") + v) + "%" }, grid: { color: "#E8ECF1" } },
+        x: { ticks: { color: cssVar("--chart-tick", "#4A5566"), font: { size: 12, family: "'Source Sans 3', sans-serif" }, maxTicksLimit: window.innerWidth < 600 ? 4 : 7, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+        y: { ticks: { color: cssVar("--chart-tick", "#4A5566"), font: { size: 12, family: "'Source Sans 3', sans-serif" }, callback: v => (wlMetric === "hit" ? v : (v > 0 ? "+" : "") + v) + "%" }, grid: { color: cssVar("--chart-grid", "#E8ECF1") } },
       },
     },
   });
@@ -1924,5 +1965,7 @@ loadData().then(() => {
   }
 });
 </script>
+<script src="version.js"></script>
+<script src="pwa.js" defer></script>
 </body>
 </html>
