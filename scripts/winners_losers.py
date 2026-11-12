@@ -579,6 +579,29 @@ DATA DIGEST:
 """
 
 
+def plain_summary(open_rows, fund_rows):
+    """A short, factual summary written from the figures alone (no AI)."""
+    priced = [r for r in open_rows if r["status"] == "priced" and r["rank"] <= DISPLAY_TOP_N]
+    in_window = [r for r in priced if r["opened_in_window"]]
+    pool = in_window if len(in_window) >= 5 else priced
+    if not pool:
+        return None
+    pool = sorted(pool, key=lambda r: r["return_pct"])
+    best, worst = pool[-1], pool[0]
+    rets = [r["return_pct"] for r in pool]
+    in_profit = round(sum(1 for x in rets if x > 0) / len(rets) * 100)
+    text = (f"Across {len(pool)} open positions in the funds' top {DISPLAY_TOP_N}, the median estimated return is "
+            f"{statistics.median(rets):+.1f}%, and {in_profit}% are above their estimated cost. "
+            f"The biggest gain is {best['ticker']} at {best['fund_name']} ({best['return_pct']:+.1f}%); "
+            f"the biggest loss is {worst['ticker']} at {worst['fund_name']} ({worst['return_pct']:+.1f}%).")
+    ranked = sorted([f for f in fund_rows if (f.get("positions") or 0) >= 3 and f.get("median_return") is not None],
+                    key=lambda f: f["median_return"], reverse=True)
+    if len(ranked) >= 2:
+        text += (f" {ranked[0]['fund_name']} has the highest median return ({ranked[0]['median_return']:+.1f}%), "
+                 f"{ranked[-1]['fund_name']} the lowest ({ranked[-1]['median_return']:+.1f}%).")
+    return text + " Costs are estimated from quarterly filings, not actual trades, and this is not investment advice."
+
+
 def build_digest(open_rows, closed_rows, fund_rows):
     scope = [r for r in open_rows if r["status"] == "priced" and r["opened_in_window"] and r["rank"] <= DISPLAY_TOP_N]
     if not scope:
@@ -711,6 +734,13 @@ def main():
             if summary:
                 save_ai_summary("winners_losers", summary, "daily price refresh", round(median_ret, 2))
                 print("[ai] generated winners & losers summary")
+            else:
+                # The AI call failed (its reason is printed above): save a plain
+                # summary of the same figures so the site never shows stale or no text.
+                text = plain_summary(open_all, fund_rows)
+                if text:
+                    save_ai_summary("winners_losers", text, "automatic summary (AI unavailable)", round(median_ret, 2))
+                    print("[ai] AI unavailable - saved an automatic summary instead")
     except Exception as e:
         print(f"[error] AI summary failed: {e}")
 

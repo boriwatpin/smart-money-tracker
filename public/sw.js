@@ -17,7 +17,7 @@
 importScripts("version.js");
 
 // @build-start
-const BUILD_ID = "20261112012636-b72edda";
+const BUILD_ID = "20261112015050-eb5a218";
 const PRECACHE = ["./", "backtest.html", "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/icon.svg", "index.html", "manifest.webmanifest", "pwa.js", "research.html", "theme.css", "theme.js", "version.js"];
 // @build-end
 

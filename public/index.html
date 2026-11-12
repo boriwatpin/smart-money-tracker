@@ -1316,15 +1316,44 @@ async function loadAiSummary(subject, elementId) {
     .limit(1);
 
   if (error || !data || data.length === 0) {
-    el.innerHTML = '<div style="color:var(--text-faint);font-size:13.5px;">No AI summary generated yet.</div>';
-    return;
+    el.innerHTML = '<div style="color:var(--text-faint);font-size:13.5px;">Preparing a summary…</div>';
+    return false;
   }
 
   const row = data[0];
   const genDate = new Date(row.generated_at).toLocaleString();
+  const automatic = /^automatic/i.test(row.trigger_reason || "");
   el.innerHTML = `
     <div style="font-size:15px;line-height:1.6;color:var(--text);">${row.summary_text}</div>
-    <div style="font-size:12px;color:var(--text-faint);margin-top:10px;">Generated ${genDate} · Trigger: ${row.trigger_reason || "—"} · AI-written (Gemini) — verify against the data below</div>`;
+    <div style="font-size:12px;color:var(--text-faint);margin-top:10px;">${automatic
+      ? `Written automatically from the figures on ${genDate}, because the AI summary wasn't available`
+      : `Generated ${genDate} · Trigger: ${row.trigger_reason || "—"} · AI-written (Gemini) — verify against the data below`}</div>`;
+  return true;
+}
+
+// Built in the browser from the Winners & Losers figures, for when no
+// summary has been saved yet. Plain arithmetic, no AI.
+function wlAutoSummaryHtml() {
+  const priced = wlRows.filter(r => r.status === "priced" && r.return_pct != null);
+  const inWindow = priced.filter(r => r.opened_in_window);
+  const pool = inWindow.length >= 5 ? inWindow : priced;
+  if (!pool.length) return null;
+  const sorted = [...pool].sort((a, b) => b.return_pct - a.return_pct);
+  const best = sorted[0], worst = sorted[sorted.length - 1];
+  const med = wlMedian(pool.map(r => r.return_pct));
+  const inProfit = Math.round(pool.filter(r => r.return_pct > 0).length / pool.length * 100);
+  const byFund = {};
+  pool.forEach(r => { (byFund[r.fund_name] = byFund[r.fund_name] || []).push(r.return_pct); });
+  const funds = Object.entries(byFund).filter(([, v]) => v.length >= 3).map(([n, v]) => [n, wlMedian(v)]).sort((a, b) => b[1] - a[1]);
+  const asOf = pool.reduce((m, r) => (r.price_as_of && r.price_as_of > m ? r.price_as_of : m), "");
+  let text = `Across ${pool.length} open positions in the funds' top 25, the median estimated return is ${wlPct(med)}, and ${inProfit}% are above their estimated cost. ` +
+    `The biggest gain is ${wlEsc(best.ticker)} at ${wlEsc(wlShortFund(best.fund_name))} (${wlPct(best.return_pct)}); the biggest loss is ${wlEsc(worst.ticker)} at ${wlEsc(wlShortFund(worst.fund_name))} (${wlPct(worst.return_pct)}).`;
+  if (funds.length >= 2) {
+    text += ` ${wlEsc(wlShortFund(funds[0][0]))} has the highest median return (${wlPct(funds[0][1])}), ${wlEsc(wlShortFund(funds[funds.length - 1][0]))} the lowest (${wlPct(funds[funds.length - 1][1])}).`;
+  }
+  text += " Costs are estimated from quarterly filings, not actual trades.";
+  return `<div style="font-size:15px;line-height:1.6;color:var(--text);">${text}</div>
+    <div style="font-size:12px;color:var(--text-faint);margin-top:10px;">Written automatically from the figures below${asOf ? ` (prices as of ${asOf})` : ""}, because no AI summary is available yet</div>`;
 }
 
 async function loadData() {
@@ -1638,7 +1667,7 @@ async function wlFetchAll(build) {
 }
 
 async function loadWinnersLosers() {
-  loadAiSummary("winners_losers", "wlAiSummary");
+  const aiShown = loadAiSummary("winners_losers", "wlAiSummary");
   const el = document.getElementById("wlContent");
   if (!supabaseClient) return;
   wlClosed = null;
@@ -1664,6 +1693,10 @@ async function loadWinnersLosers() {
     return;
   }
   renderWinnersLosers();
+  if (!(await aiShown)) {
+    const html = wlAutoSummaryHtml();
+    if (html) document.getElementById("wlAiSummary").innerHTML = html;
+  }
 }
 
 function wlSet(kind, value) {
